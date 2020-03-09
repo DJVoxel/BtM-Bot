@@ -12,7 +12,7 @@ from collections import OrderedDict
 
 COMMAND_PREFIX = '/'
 
-BOT_KEY = 'NjgzMzcyOTY3ODgyOTE1ODg5.XlqmyQ.LUrqjqMP8plNlsFtrLEPPOqy8F4'
+BOT_KEY = '<Bot key goes here>'
 
 bot = commands.Bot(COMMAND_PREFIX)
 
