@@ -398,7 +398,7 @@ async def deny(ctx, member: discord.Member):
     else:
         await ctx.send('You do not have any denies.')
 
-@accept.error
+@deny.error
 async def deny_error(ctx, error):
     if isinstance(error, commands.BadArgument):
         await ctx.send('I could not find that member.')
