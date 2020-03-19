@@ -590,7 +590,7 @@ async def game_loop(ctx): #TODO
                 await asyncio.sleep(0.1)
             print(datetime.datetime.now())
             for item in challenges:
-                if item['status'] == 'Denied':
+                if challenges[item]['status'] == 'Denied':
                     await ctx.send("**The {}**'s {} with **The {}** was denied.".format(players[item]['mask'], challenges[item]['type'], players[challenges[item]['opponent']]['mask']))
                 else:
                     if players[item]['role'][challenges[item]['type']] > players[challenges[item]['opponent']]['role'][challenges[item]['type']]:
