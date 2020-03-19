@@ -15,9 +15,7 @@ import random
 import datetime
 from datetime import timedelta
 
-COMMAND_PREFIX = '/'
-
-BOT_KEY = '<Bot Key>'
+from Settings import *
 
 bot = commands.Bot(COMMAND_PREFIX)
 
