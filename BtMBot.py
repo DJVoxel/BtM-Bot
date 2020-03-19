@@ -574,11 +574,11 @@ async def game_loop(ctx): #TODO
             end_phase = False
 
             game_info = discord.Embed(title='CP{}'.format(state['round']))
-            game_info.add_field(name='Pending Challenges', value='None')
-            game_info.add_field(name='Accepted Challenges', value='None')
-            game_info.add_field(name='Denied Challenges', value='None')
-            game_info.add_field(name='Cowards', value='None')
-            game_info.add_field(name='Waiting On', value='None')
+            game_info.add_field(name='Pending Challenges', value='None', inline=False)
+            game_info.add_field(name='Accepted Challenges', value='None', inline=False)
+            game_info.add_field(name='Denied Challenges', value='None', inline=False)
+            game_info.add_field(name='Cowards', value='None', inline=False)
+            game_info.add_field(name='Waiting On', value='None', inline=False)
 
             await ctx.send('It is now CP{}. You may make challenges with /challenge and accept them with /accept and /deny'.format(state['round']))
             state['phase'] = 'CP'
@@ -630,7 +630,7 @@ async def update_info(new_info, author_id = None):
         else:
             pre_value = game_info.fields[field_id].value
 
-    game_info.set_field_at(field_id, name=game_info.fields[field_id].name, value=pre_value.append(message))
+    game_info.set_field_at(field_id, name=game_info.fields[field_id].name, value=pre_value.append(message), inline=False)
 
 
 
