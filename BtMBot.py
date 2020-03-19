@@ -216,7 +216,7 @@ async def join(ctx, mask):
         'plate':{'poisoned':False},
         'death':''
         }
-    await ctx.send('{} has joined the game as **The {}**! {} more players neeeded.'.format(ctx.author.mention, mask, MAX_PLAYERS - len(players)))
+    await ctx.send('{} has joined the game as **The {}**! {} more players needed.'.format(ctx.author.mention, mask, MAX_PLAYERS - len(players)))
 
 @join.error
 async def join_error(ctx, error):
@@ -556,7 +556,7 @@ async def init_game(ctx):
         await player.send('You are **The {}**!'.format(players[player.id]['role']['name']))
         i += 1
 
-        bot.loop.create_task(game_loop(ctx))
+    bot.loop.create_task(game_loop(ctx))
 
 async def game_loop(ctx): #TODO
     global challenges
