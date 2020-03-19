@@ -189,7 +189,7 @@ async def setup_error(ctx, error):
     if isinstance(error, commands.MissingRequiredArgument):
         await ctx.send('Missing player role name.')
     else:
-        handle_errors(ctx, error)
+        await handle_errors(ctx, error)
 
 #--------- Help and Info ---------#
 @bot.command()
@@ -199,7 +199,7 @@ async def info(ctx):
 
 @info.error
 async def info_error(ctx, error):
-    handle_errors(ctx, error)
+    await handle_errors(ctx, error)
 
 #--------- Join and Leave ---------#
 @bot.command()
@@ -225,7 +225,7 @@ async def join_error(ctx, error):
     if isinstance(error, commands.MissingRequiredArgument):
         await ctx.send('Please list your mask. {}join <mask_name>'.format(COMMAND_PREFIX))
     else:
-        handle_errors(ctx, error)
+        await handle_errors(ctx, error)
 
 @bot.command()
 @commands.check(is_player)
@@ -241,7 +241,7 @@ async def leave(ctx):
 
 @leave.error
 async def leave_error(ctx, error):
-    handle_errors(ctx, error)
+    await handle_errors(ctx, error)
 
 @bot.command()
 @commands.check(in_game_channel)
@@ -263,7 +263,7 @@ async def fleave_error(ctx, error):
     elif isinstance(error, commands.BadArgument):
         await ctx.send('I could not find that member.')
     else:
-        handle_errors(ctx, error)
+        await handle_errors(ctx, error)
 
 #--------- Start and Stop ---------#
 @bot.command()
@@ -277,7 +277,7 @@ async def start(ctx):
 
 @start.error
 async def start_error(ctx, error):
-    handle_errors(ctx, error)
+    await handle_errors(ctx, error)
     
 
 @bot.command()
@@ -290,7 +290,7 @@ async def fstart(ctx): #Forces init_game()
 
 @fstart.error
 async def fstart_error(ctx, error):
-    handle_errors(ctx, error)
+    await handle_errors(ctx, error)
 
 @bot.command()
 @commands.check(is_running)
@@ -302,7 +302,7 @@ async def fstop(ctx): #Forces end_game()
 
 @fstop.error
 async def fstop_error(ctx, error):
-    handle_errors(ctx, error)
+    await handle_errors(ctx, error)
 
 #--------- Skip ---------#
 @bot.command()
@@ -341,7 +341,7 @@ async def challenge_error(ctx, error):
     elif isinstance(error, commands.MissingRequiredArgument):
         await ctx.send('{}challenge <player> <dance/duel>'.format(COMMAND_PREFIX))
     else:
-        handle_errors(ctx, error)
+        await handle_errors(ctx, error)
 
 @bot.command()
 @commands.check(is_CP)
@@ -372,7 +372,7 @@ async def accept_error(ctx, error):
     elif isinstance(error, commands.MissingRequiredArgument):
         await ctx.send('{}accept <player>'.format(COMMAND_PREFIX))
     else:
-        handle_errors(ctx, error)
+        await handle_errors(ctx, error)
 
 @bot.command()
 @commands.check(is_CP)
@@ -407,7 +407,7 @@ async def deny_error(ctx, error):
     elif isinstance(error, commands.MissingRequiredArgument):
         await ctx.send('{}deny <player>'.format(COMMAND_PREFIX))
     else:
-        handle_errors(ctx, error)
+        await handle_errors(ctx, error)
 
 #--------- Voting Phase ---------#
 @bot.command()
@@ -441,7 +441,7 @@ async def claim_error(ctx, error):
     elif isinstance(error, commands.MissingRequiredArgument):
         await ctx.send('{}claim <gift>'.format(COMMAND_PREFIX))
     else:
-        handle_errors(ctx, error)
+        await handle_errors(ctx, error)
 
 @bot.command()
 @commands.check(is_VP)
@@ -473,7 +473,7 @@ async def redeem_error(ctx, error):
     elif isinstance(error, commands.MissingRequiredArgument):
         await ctx.send('{}redeem <gift>'.format(COMMAND_PREFIX))
     else:
-        handle_errors(ctx, error)
+        await handle_errors(ctx, error)
 
 @bot.command()
 @commands.check(is_VP)
@@ -506,7 +506,7 @@ async def vote_error(ctx, error):
     elif isinstance(error, commands.MissingRequiredArgument):
         await ctx.send('{}vote <player>'.format(COMMAND_PREFIX))
     else:
-        handle_errors(ctx, error)
+        await handle_errors(ctx, error)
 
 #--------- Dinner Phase ---------#
 @bot.command()
@@ -534,7 +534,7 @@ async def switch_error(ctx, error):
     elif isinstance(error, commands.MissingRequiredArgument):
         await ctx.send('{}switch <player>'.format(COMMAND_PREFIX))
     else:
-        handle_errors(ctx, error)
+        await handle_errors(ctx, error)
 
 ########## FUNCTIONS ##########
 async def init_game(ctx):
