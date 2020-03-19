@@ -29,6 +29,7 @@ dead = OrderedDict() #uid:[mask, role, death]
 state = {'phase':None, 'round':1}
 challenges = OrderedDict() #uid:[dance/duel, uid]
 votes = OrderedDict() #uid:[uids of voters]
+end_phase = False
 
 guild_settings = {} #guild id:{'channel':game channel, 'role': player role}
 
@@ -71,16 +72,34 @@ class NoGameChannel(commands.CheckFailure):
 class NotGameChannel(commands.CheckFailure):
     pass
 
-class GameStateError(commands.CheckFailure):
+class GameRunningError(commands.CheckFailure):
     pass
 
-class PlayerStateError(commands.CheckFailure):
+class GameNotRunningError(commands.CheckFailure):
     pass
 
-class GameSizeError(commands.CheckFailure):
+class IsPlayerError(commands.CheckFailure):
     pass
 
-class PhaseStateError(commands.CheckFailure):
+class NotPlayerError(commands.CheckFailure):
+    pass
+
+class GameFullError(commands.CheckFailure):
+    pass
+
+class GameNotFullError(commands.CheckFailure):
+    pass
+
+class NotCPError(commands.CheckFailure):
+    pass
+
+class NotVPError(commands.CheckFailure):
+    pass
+
+class NotDPError(commands.CheckFailure):
+    pass
+
+class GameEnded(Exception):
     pass
 
 ########## CHECKS ##########
@@ -96,47 +115,47 @@ def in_game_channel(ctx):
 
 def is_running(ctx):
     if not running:
-        raise GameStateError
+        raise GameNotRunningError
     return True
 
 def is_not_running(ctx):
     if running:
-        raise GameStateError
+        raise GameRunningError
     return True
 
 def is_player(ctx):
     if ctx.author.id not in players:
-        raise PlayerStateError
+        raise IsPlayerError
     return True
 
 def is_not_player(ctx):
     if ctx.author.id in players:
-        raise PlayerStateError
+        raise NotPlayerError
     return True
 
 def game_full(ctx):
     if len(players) < MIN_PLAYERS:
-        raise GameSizeError
+        raise GameNotFullError
     return True
 
 def game_not_full(ctx):
     if len(players) >= MAX_PLAYERS:
-        raise GameSizeError
+        raise GameFullError
     return True
 
 def is_CP(ctx):
     if state['phase'] != 'CP':
-        raise PhaseStateError
+        raise NotCPError
     return True
 
 def is_VP(ctx):
     if state['phase'] != 'VP':
-        raise PhaseStateError
+        raise NotVPError
     return True
 
 def is_DP(ctx):
     if state['phase'] != 'DP':
-        raise PhaseStateError
+        raise NotDPError
     return True
 
 ########## COMMANDS ##########
@@ -167,15 +186,20 @@ async def setup(ctx, role_name):
 
 @setup.error
 async def setup_error(ctx, error):
-    if isinstance(error, commands.NotOwner):
-        await ctx.send('You do not have permission to use this command.')
-    elif isinstance(error, commands.MissingRequiredArgument):
+    if isinstance(error, commands.MissingRequiredArgument):
         await ctx.send('Missing player role name.')
+    else:
+        handle_errors(ctx, error)
 
 #--------- Help and Info ---------#
 @bot.command()
+@commands.check(is_running)
 async def info(ctx):
     await ctx.send(embed=game_info)
+
+@info.error
+async def info_error(ctx, error):
+    handle_errors(ctx, error)
 
 #--------- Join and Leave ---------#
 @bot.command()
@@ -198,18 +222,10 @@ async def join(ctx, mask):
 
 @join.error
 async def join_error(ctx, error):
-    if isinstance(error, NoGameChannel):
-        await ctx.send('There is no designated game channel on this server, please use the {}setup command to designate one.'.format(COMMAND_PREFIX))
-    if isinstance(error, NotGameChannel):
-        await ctx.send('This is not the game channel, please retry this command within {}'.format(guild_settings[ctx.guild.id]['channel'].mention))
-    if isinstance(error, GameStateError):
-        await ctx.send('You cannot join whie the game is running.')
-    if isinstance(error, GameSizeError):
-        await ctx.send('The game is already full. Please wait for the next game.')
-    if isinstance(error, PlayerStateError):
-        await ctx.send('You are already in the game.')
     if isinstance(error, commands.MissingRequiredArgument):
         await ctx.send('Please list your mask. {}join <mask_name>'.format(COMMAND_PREFIX))
+    else:
+        handle_errors(ctx, error)
 
 @bot.command()
 @commands.check(is_player)
@@ -225,12 +241,7 @@ async def leave(ctx):
 
 @leave.error
 async def leave_error(ctx, error):
-    if isinstance(error, NoGameChannel):
-        await ctx.send('There is no designated game channel on this server, please use the {}setup command to designate one.'.format(COMMAND_PREFIX))
-    if isinstance(error, NotGameChannel):
-        await ctx.send('This is not the game channel, please retry this command within {}'.format(guild_settings[ctx.guild.id]['channel'].mention))
-    if isinstance(error, PlayerStateError):
-        await ctx.send('You are not in a game.')
+    handle_errors(ctx, error)
 
 @bot.command()
 @commands.check(in_game_channel)
@@ -247,16 +258,12 @@ async def fleave(ctx, member: discord.Member):
 
 @fleave.error
 async def fleave_error(ctx, error):
-    if isinstance(error, commands.NotOwner):
-        await ctx.send('You do not have the permissions to perform this command.')
-    if isinstance(error, NoGameChannel):
-        await ctx.send('There is no designated game channel on this server, please use the {}setup command to designate one.'.format(COMMAND_PREFIX))
-    if isinstance(error, NotGameChannel):
-        await ctx.send('This is not the game channel, please retry this command within {}'.format(guild_settings[ctx.guild.id]['channel'].mention))
     if isinstance(error, commands.MissingRequiredArgument):
         await ctx.send('Please include the member you wish to kick from the game.')
-    if isinstance(error, commands.BadArgument):
+    elif isinstance(error, commands.BadArgument):
         await ctx.send('I could not find that member.')
+    else:
+        handle_errors(ctx, error)
 
 #--------- Start and Stop ---------#
 @bot.command()
@@ -270,16 +277,8 @@ async def start(ctx):
 
 @start.error
 async def start_error(ctx, error):
-    if isinstance(error, NoGameChannel):
-        await ctx.send('There is no designated game channel on this server, please use the {}setup command to designate one.'.format(COMMAND_PREFIX))
-    if isinstance(error, NotGameChannel):
-        await ctx.send('This is not the game channel, please retry this command within {}'.format(guild_settings[ctx.guild.id]['channel'].mention))
-    if isinstance(error, GameStateError):
-        await ctx.send('A game is already running.')
-    if isinstance(error, PlayerStateError):
-        await ctx.send('You cannot start a game you are not apart of. Use {}join first.'.format(COMMAND_PREFIX))
-    if isinstance(error, GameSizeError):
-        await ctx.send('The game does not have enough players yet, you need at least {} more.'.format(MIN_PLAYERS - len(players)))
+    handle_errors(ctx, error)
+    
 
 @bot.command()
 @commands.check(is_not_running)
@@ -291,14 +290,7 @@ async def fstart(ctx): #Forces init_game()
 
 @fstart.error
 async def fstart_error(ctx, error):
-    if isinstance(error, commands.NotOwner):
-        await ctx.send('You do not have the permissions to perform this command.')
-    if isinstance(error, NoGameChannel):
-        await ctx.send('There is no designated game channel on this server, please use the {}setup command to designate one.'.format(COMMAND_PREFIX))
-    if isinstance(error, NotGameChannel):
-        await ctx.send('This is not the game channel, please retry this command within {}'.format(guild_settings[ctx.guild.id]['channel'].mention))
-    if isinstance(error, GameStateError):
-        await ctx.send('A game is already running.')
+    handle_errors(ctx, error)
 
 @bot.command()
 @commands.check(is_running)
@@ -306,18 +298,20 @@ async def fstart_error(ctx, error):
 @commands.is_owner()
 async def fstop(ctx): #Forces end_game()
     await end_game(ctx)
-    await ctx.send('Force stopped game.')
+    await ctx.send('Force stopping game....')
 
 @fstop.error
 async def fstop_error(ctx, error):
-    if isinstance(error, commands.NotOwner):
-        await ctx.send('You do not have the permissions to perform this command.')
-    if isinstance(error, NoGameChannel):
-        await ctx.send('There is no designated game channel on this server, please use the {}setup command to designate one.'.format(COMMAND_PREFIX))
-    if isinstance(error, NotGameChannel):
-        await ctx.send('This is not the game channel, please retry this command within {}'.format(guild_settings[ctx.guild.id]['channel'].mention))
-    if isinstance(error, GameStateError):
-        await ctx.send('There is no game running at the moment.')
+    handle_errors(ctx, error)
+
+#--------- Skip ---------#
+@bot.command()
+@commands.check(is_running)
+@commands.check(in_game_channel)
+@commands.is_owner()
+async def fskip(ctx):
+    global end_phase
+    end_phase = True
 
 #--------- Challenge Phase --------#
 @bot.command()
@@ -325,13 +319,14 @@ async def fstop_error(ctx, error):
 @commands.check(is_player)
 @commands.check(is_running)
 @commands.check(in_game_channel)
-async def challenge(ctx, member: discord.Member, challenge_type: str):
+async def challenge(ctx, member: discord.Member, challenge_type):
     global challenges
     if ctx.author.id not in challenges:
         if member.id in players:
             if challenge_type.lower() == 'dance' or challenge_type.lower() == 'duel':
-                challenges[ctx.author.id] = {'type':challenge_type.lower(), 'opponent':member.id, 'status':'pending'}
+                challenges[ctx.author.id] = {'type':challenge_type.lower(), 'opponent':member.id, 'status':'Pending'}
                 await ctx.send('**The {}** has challenged **The {}** to a **{}**!'.format(players[ctx.author.id]['mask'], players[member.id]['mask'], challenge_type.lower()))
+                await update_info(challenges[ctx.author.id], author_id=ctx.author.id)
             else:
                 await ctx.send('"{}" is not a valid challenge type.'.format(challenge_type))
         else:
@@ -341,20 +336,12 @@ async def challenge(ctx, member: discord.Member, challenge_type: str):
 
 @challenge.error
 async def challenge_error(ctx, error):
-    if isinstance(error, NoGameChannel):
-        await ctx.send('There is no designated game channel on this server, please use the {}setup command to designate one.'.format(COMMAND_PREFIX))
-    if isinstance(error, NotGameChannel):
-        await ctx.send('This is not the game channel, please retry this command within {}'.format(guild_settings[ctx.guild.id]['channel'].mention))
-    if isinstance(error, GameStateError):
-        await ctx.send('There is no game running at the moment.')
-    if isinstance(error, PlayerStateError):
-        await ctx.send('You are not playing in the current game. please wait for the next one.')
-    if isinstance(error, PhaseStateError):
-        await ctx.send('It is not currently the Challenge Phase.')
     if isinstance(error, commands.BadArgument):
         await ctx.send('I could not find that member, or your challenge type is invalid.')
-    if isinstance(error, commands.MissingRequiredArgument):
+    elif isinstance(error, commands.MissingRequiredArgument):
         await ctx.send('{}challenge <player> <dance/duel>'.format(COMMAND_PREFIX))
+    else:
+        handle_errors(ctx, error)
 
 @bot.command()
 @commands.check(is_CP)
@@ -364,37 +351,28 @@ async def challenge_error(ctx, error):
 async def accept(ctx, member: discord.Member):
     global challenges
     if member.id in players:
-        try:
+        if member.id in challenges:
             if challenges[member.id]['opponent'] == ctx.author.id:
-                if challenges[member.id]['status'] == 'pending':
-                    challenges[member.id]['status'] = 'accepted'
+                if challenges[member.id]['status'] == 'Pending':
+                    challenges[member.id]['status'] = 'Accepted'
                     await ctx.send("**The {}** has accepted **The {}'s** {}!".format(players[ctx.author.id]['mask'], players[member.id]['mask'], challenges[member.id]['type']))
                 else:
                     await ctx.send('You have already accepted or denied this challenge.')
             else:
                 await ctx.send('This player has not challenged you')
-        except KeyError as e:
-            print(e)
-            await ctx.send('This player has not challenged you')
+        else:
+            await ctx.send('This player has not challenged yet')
     else:
         await ctx.send('Please select a user that is playing in the current game.')
 
 @accept.error
 async def accept_error(ctx, error):
-    if isinstance(error, NoGameChannel):
-        await ctx.send('There is no designated game channel on this server, please use the {}setup command to designate one.'.format(COMMAND_PREFIX))
-    if isinstance(error, NotGameChannel):
-        await ctx.send('This is not the game channel, please retry this command within {}'.format(guild_settings[ctx.guild.id]['channel'].mention))
-    if isinstance(error, GameStateError):
-        await ctx.send('There is no game running at the moment.')
-    if isinstance(error, PlayerStateError):
-        await ctx.send('You are not playing in the current game. please wait for the next one.')
-    if isinstance(error, PhaseStateError):
-        await ctx.send('It is not currently the Challenge Phase.')
     if isinstance(error, commands.BadArgument):
         await ctx.send('I could not find that member.')
-    if isinstance(error, commands.MissingRequiredArgument):
+    elif isinstance(error, commands.MissingRequiredArgument):
         await ctx.send('{}accept <player>'.format(COMMAND_PREFIX))
+    else:
+        handle_errors(ctx, error)
 
 @bot.command()
 @commands.check(is_CP)
@@ -405,19 +383,18 @@ async def deny(ctx, member: discord.Member):
     global challenges
     if players[ctx.author.id]['gifts']['deny'] >= 1:
         if member.id in players:
-            try:
+            if member.id in challenges:
                 if challenges[member.id]['opponent'] == ctx.author.id:
-                    if challenges[member.id]['status'] == 'pending':
+                    if challenges[member.id]['status'] == 'Pending':
                         players[ctx.author.id]['gifts']['deny'] -= 1
-                        challenges[member.id]['status'] = 'denied'
+                        challenges[member.id]['status'] = 'Denied'
                         await ctx.send("**The {}** has denied **The {}'s** {}!".format(players[ctx.author.id]['mask'], players[member.id]['mask'], challenges[member.id]['type']))
                     else:
                         await ctx.send('You have already accepted or denied this challenge.')
                 else:
                     await ctx.send('This player has not challenged you')
-            except KeyError as e:
-                    print(e)
-                    await ctx.send('This player has not challenged you')
+            else:
+                await ctx.send('This player has not challenged yet')
         else:
             await ctx.send('Please select a user that is playing in the current game.')
     else:
@@ -425,20 +402,12 @@ async def deny(ctx, member: discord.Member):
 
 @accept.error
 async def deny_error(ctx, error):
-    if isinstance(error, NoGameChannel):
-        await ctx.send('There is no designated game channel on this server, please use the {}setup command to designate one.'.format(COMMAND_PREFIX))
-    if isinstance(error, NotGameChannel):
-        await ctx.send('This is not the game channel, please retry this command within {}'.format(guild_settings[ctx.guild.id]['channel'].mention))
-    if isinstance(error, GameStateError):
-        await ctx.send('There is no game running at the moment.')
-    if isinstance(error, PlayerStateError):
-        await ctx.send('You are not playing in the current game. please wait for the next one.')
-    if isinstance(error, PhaseStateError):
-        await ctx.send('It is not currently the Challenge Phase.')
     if isinstance(error, commands.BadArgument):
         await ctx.send('I could not find that member.')
-    if isinstance(error, commands.MissingRequiredArgument):
+    elif isinstance(error, commands.MissingRequiredArgument):
         await ctx.send('{}deny <player>'.format(COMMAND_PREFIX))
+    else:
+        handle_errors(ctx, error)
 
 #--------- Voting Phase ---------#
 @bot.command()
@@ -467,14 +436,12 @@ async def claim(ctx, gift):
 
 @claim.error
 async def claim_error(ctx, error):
-    if isinstance(error, commands.PrivateMessageOnly):
-        await ctx.send('Please claim gifts in DMs.')
-    if isinstance(error, PlayerStateError):
-        await ctx.send('You are not playing in the current game, please wait for the next one.')
     if isinstance(error, commands.BadArgument):
         await ctx.send('That gift does not exist.')
-    if isinstance(error, commands.MissingRequiredArgument):
+    elif isinstance(error, commands.MissingRequiredArgument):
         await ctx.send('{}claim <gift>'.format(COMMAND_PREFIX))
+    else:
+        handle_errors(ctx, error)
 
 @bot.command()
 @commands.check(is_VP)
@@ -501,18 +468,12 @@ async def redeem(ctx, gift):
 
 @redeem.error
 async def redeem_error(ctx, error):
-    if isinstance(error, NoGameChannel):
-        await ctx.send('There is no designated game channel on this server, please use the {}setup command to designate one.'.format(COMMAND_PREFIX))
-    if isinstance(error, NotGameChannel):
-        await ctx.send('This is not the game channel, please retry this command within {}'.format(guild_settings[ctx.guild.id]['channel'].mention))
-    if isinstance(error, GameStateError):
-        await ctx.send('There is no game running at the moment.')
-    if isinstance(error, PlayerStateError):
-        await ctx.send('You are not playing in the current game, please wait for the next one.')
     if isinstance(error, commands.BadArgument):
         await ctx.send('That gift does not exist.')
-    if isinstance(error, commands.MissingRequiredArgument):
+    elif isinstance(error, commands.MissingRequiredArgument):
         await ctx.send('{}redeem <gift>'.format(COMMAND_PREFIX))
+    else:
+        handle_errors(ctx, error)
 
 @bot.command()
 @commands.check(is_VP)
@@ -540,20 +501,12 @@ async def vote(ctx, member: discord.Member):
 
 @vote.error
 async def vote_error(ctx, error):
-    if isinstance(error, NoGameChannel):
-        await ctx.send('There is no designated game channel on this server, please use the {}setup command to designate one.'.format(COMMAND_PREFIX))
-    if isinstance(error, NotGameChannel):
-        await ctx.send('This is not the game channel, please retry this command within {}'.format(guild_settings[ctx.guild.id]['channel'].mention))
-    if isinstance(error, GameStateError):
-        await ctx.send('There is no game running at the moment.')
-    if isinstance(error, PlayerStateError):
-        await ctx.send('You are not playing in the current game. please wait for the next one.')
-    if isinstance(error, PhaseStateError):
-        await ctx.send('It is not currently the Voting Phase.')
     if isinstance(error, commands.BadArgument):
         await ctx.send('I could not find that member.')
-    if isinstance(error, commands.MissingRequiredArgument):
+    elif isinstance(error, commands.MissingRequiredArgument):
         await ctx.send('{}vote <player>'.format(COMMAND_PREFIX))
+    else:
+        handle_errors(ctx, error)
 
 #--------- Dinner Phase ---------#
 @bot.command()
@@ -576,26 +529,20 @@ async def switch(ctx, member: discord.Member):
 
 @switch.error
 async def switch_error(ctx, error):
-    if isinstance(error, NoGameChannel):
-        await ctx.send('There is no designated game channel on this server, please use the {}setup command to designate one.'.format(COMMAND_PREFIX))
-    if isinstance(error, NotGameChannel):
-        await ctx.send('This is not the game channel, please retry this command within {}'.format(guild_settings[ctx.guild.id]['channel'].mention))
-    if isinstance(error, GameStateError):
-        await ctx.send('There is no game running at the moment.')
-    if isinstance(error, PlayerStateError):
-        await ctx.send('You are not playing in the current game. please wait for the next one.')
-    if isinstance(error, PhaseStateError):
-        await ctx.send('It is not currently the Dinner Phase.')
     if isinstance(error, commands.BadArgument):
         await ctx.send('I could not find that member.')
-    if isinstance(error, commands.MissingRequiredArgument):
+    elif isinstance(error, commands.MissingRequiredArgument):
         await ctx.send('{}switch <player>'.format(COMMAND_PREFIX))
+    else:
+        handle_errors(ctx, error)
 
 ########## FUNCTIONS ##########
 async def init_game(ctx):
     global running
     global state
     global players
+    global end_phase
+    end_phase = False
     running = True #Game is running
     state['round'] = 0
 
@@ -611,39 +558,41 @@ async def init_game(ctx):
         await player.send('You are **The {}**!'.format(players[player.id]['role']['name']))
         i += 1
 
-    bot.loop.create_task(game_loop(ctx))
+        bot.loop.create_task(game_loop(ctx))
 
 async def game_loop(ctx): #TODO
     global challenges
     global state
     global phase_start
     global game_info
-    while running:
-        state['round'] += 1
-        challenges = OrderedDict()
-        phase_start = datetime.datetime.now()
-        print(phase_start)
+    global end_phase
+    try:
+        while running:
+            state['round'] += 1
+            challenges = OrderedDict()
+            phase_start = datetime.datetime.now()
+            end_phase = False
 
-        game_info = discord.Embed(title='CP{}'.format(state['round']))
-        game_info.add_field(name='Pending Challenges', value='None')
-        game_info.add_field(name='Accepted Challenges', value='None')
-        game_info.add_field(name='Denied Challenges', value='None')
-        game_info.add_field(name='Cowards', value='None')
-        game_info.add_field(name='Waiting On', value='None')
+            game_info = discord.Embed(title='CP{}'.format(state['round']))
+            game_info.add_field(name='Pending Challenges', value='None')
+            game_info.add_field(name='Accepted Challenges', value='None')
+            game_info.add_field(name='Denied Challenges', value='None')
+            game_info.add_field(name='Cowards', value='None')
+            game_info.add_field(name='Waiting On', value='None')
 
-        await ctx.send('It is now CP{}. You may make challenges with /challenge and accept them with /accept and /deny'.format(state['round']))
-        state['phase'] = 'CP'
-        try:
-            while (datetime.datetime.now() - phase_start) < timedelta(seconds=30):
-                print(phase_start)
-                print(datetime.datetime.now())
-                print(phase_start - datetime.datetime.now())
+            await ctx.send('It is now CP{}. You may make challenges with /challenge and accept them with /accept and /deny'.format(state['round']))
+            state['phase'] = 'CP'
+            print(phase_start)
+            print(phase_start + timedelta(seconds=30))
+            while datetime.datetime.now() < phase_start + timedelta(seconds=30):
+                if not running:
+                    raise GameEnded
+                if end_phase:
+                    break
                 await asyncio.sleep(0.1)
-        except Exception as e:
-            print(e.__traceback__)
-        try:
+            print(datetime.datetime.now())
             for item in challenges:
-                if item['status'] == 'denied':
+                if item['status'] == 'Denied':
                     await ctx.send("**The {}**'s {} with **The {}** was denied.".format(players[item]['mask'], challenges[item]['type'], players[challenges[item]['opponent']]['mask']))
                 else:
                     if players[item]['role'][challenges[item]['type']] > players[challenges[item]['opponent']]['role'][challenges[item]['type']]:
@@ -656,10 +605,35 @@ async def game_loop(ctx): #TODO
                         players[item]['votes']['votable'] = True
                     players[item]['gifts']['unclaimed'] += 1
                     players[challenges[item]['opponent']]['gifts']['unclaimed'] +=1
-                    await ctx.send('**The {}** won the {} with the {}.'.format(winner, challenges[item]['type'], loser))
-        except Exception as e:
-            print(e.__traceback__)     
-            
+                    await ctx.send('**The {}** won the {} with the {}.'.format(winner, challenges[item]['type'], loser))    
+    except GameEnded:
+        await ctx.send('Game was forced to stop.')
+
+async def update_info(new_info, author_id = None):
+    global game_info
+    if state['phase'] == 'CP':
+        if new_info['status'] == 'Pending':
+            field_id = 0
+            message = 'The {} has challenged the {} to a {}'.format(players[author_id]['mask'], players[new_info['opponent']]['mask'], new_info['type'])
+        elif new_info['status'] == 'Accepted':
+            field_id = 1
+            message = 'The {} will {} with The {}'.format(players[author_id]['mask'], new_info['type'], players[new_info['opponent']]['mask'])
+        elif new_info['status'] == 'Denied':
+            field_id = 2
+            message = "The {} has denied The {}'s {}".format(players[author_id]['mask'], players[new_info['opponent']]['mask'], new_info['type'])
+        else:
+            field_id = 3
+            message = 'The {}'.format(players[author_id]['mask'])
+
+        if game_info.fields[field_id].value == 'None':
+            pre_value = ''
+        else:
+            pre_value = game_info.fields[field_id].value
+
+    game_info.set_field_at(field_id, name=game_info.fields[field_id].name, value=pre_value.append(message))
+
+
+
 async def remove_role(ctx, member):
     try:
         member = await commands.MemberConverter().convert(ctx, str(member))
@@ -688,5 +662,33 @@ async def end_game(ctx):
     
     players = OrderedDict()
     running = False
+
+async def handle_errors(ctx, error):
+    if isinstance(error, NoGameChannel):
+        await ctx.send('There is no designated game channel on this server, please use the {}setup command to designate one.'.format(COMMAND_PREFIX))
+    if isinstance(error, NotGameChannel):
+        await ctx.send('This is not the game channel, please retry this command within {}'.format(guild_settings[ctx.guild.id]['channel'].mention))
+    if isinstance(error, commands.NotOwner):
+        await ctx.send('You do not have permission to use this command.')
+    if isinstance(error, GameNotRunningError):
+        await ctx.send('There is no game currently running.')
+    if isinstance(error, GameRunningError):
+        await ctx.send('You cannot join whie the game is running.')
+    if isinstance(error, GameFullError):
+        await ctx.send('The game is already full. Please wait for the next game.')
+    if isinstance(error, GameNotFullError):
+        await ctx.send('The game does not have enough players yet, you need at least {} more.'.format(MIN_PLAYERS - len(players)))
+    if isinstance(error, IsPlayerError):
+        await ctx.send('You are already in the game.')
+    if isinstance(error, NotPlayerError):
+        await ctx.send('You are not playing in the current game. Please join using {}join or wait for the game to end.'.format(COMMAND_PREFIX))
+    if isinstance(error, NotCPError):
+        await ctx.send('It is not currently the Challenge Phase.')
+    if isinstance(error, NotVPError):
+        await ctx.send('It is not currently the Voting Phase.')
+    if isinstance(error, NotDPError):
+        await ctx.send('It is not currently the Dinner Phase.')
+    if isinstance(error, commands.PrivateMessageOnly):
+        await ctx.send('Please only use this command in DMs.')
 
 bot.run(BOT_KEY)
