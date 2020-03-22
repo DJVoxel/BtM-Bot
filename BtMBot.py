@@ -313,10 +313,13 @@ async def challenge(ctx, member: discord.Member, challenge_type): #TODO Prevent 
     global challenges
     if ctx.author.id not in challenges:
         if member.id in players:
-            if challenge_type.lower() == 'dance' or challenge_type.lower() == 'duel':
-                challenges[ctx.author.id] = {'type':challenge_type.lower(), 'opponent':member.id, 'status':'Pending'}
-                await ctx.send('**The {}** has challenged **The {}** to a **{}**!'.format(players[ctx.author.id]['mask'], players[member.id]['mask'], challenge_type.lower()))
-                update_info(challenges[ctx.author.id], author_id=ctx.author.id)
+            if member.id == ctx.author.id:
+                if challenge_type.lower() == 'dance' or challenge_type.lower() == 'duel':
+                    challenges[ctx.author.id] = {'type':challenge_type.lower(), 'opponent':member.id, 'status':'Pending'}
+                    await ctx.send('**The {}** has challenged **The {}** to a **{}**!'.format(players[ctx.author.id]['mask'], players[member.id]['mask'], challenge_type.lower()))
+                    update_info(challenges[ctx.author.id], author_id=ctx.author.id)
+                else:
+                    await ctx.send('You cannot challenge yourself.')
             else:
                 await ctx.send('"{}" is not a valid challenge type.'.format(challenge_type))
         else:
