@@ -166,6 +166,7 @@ async def ping(ctx):
 #--------- Setup ---------#
 @bot.command()
 @commands.is_owner()
+@commands.guild_only()
 async def setup(ctx, role_name):
     global guild_settings
 
@@ -187,19 +188,16 @@ async def setup(ctx, role_name):
 @setup.error
 async def setup_error(ctx, error):
     if isinstance(error, commands.MissingRequiredArgument):
-        await ctx.send('Missing player role name.')
+        await ctx.send('{}setup <Role Name>'.format(COMMAND_PREFIX))
     else:
         await handle_errors(ctx, error)
 
 #--------- Help and Info ---------#
 @bot.command()
 @commands.check(is_running)
+@commands.guild_only()
 async def info(ctx):
     await ctx.send(embed=game_info)
-
-@info.error
-async def info_error(ctx, error):
-    await handle_errors(ctx, error)
 
 #--------- Join and Leave ---------#
 @bot.command()
@@ -207,6 +205,7 @@ async def info_error(ctx, error):
 @commands.check(game_not_full)
 @commands.check(is_not_running)
 @commands.check(in_game_channel)
+@commands.guild_only()
 async def join(ctx, mask):
     global players
     await ctx.author.add_roles(guild_settings[ctx.guild.id]['role'])
@@ -230,6 +229,7 @@ async def join_error(ctx, error):
 @bot.command()
 @commands.check(is_player)
 @commands.check(in_game_channel)
+@commands.guild_only()
 async def leave(ctx):
     global players
     if running:
@@ -239,13 +239,10 @@ async def leave(ctx):
         await ctx.author.remove_roles(guild_settings[ctx.guild.id]['role'])
         players.pop(ctx.author.id)
 
-@leave.error
-async def leave_error(ctx, error):
-    await handle_errors(ctx, error)
-
 @bot.command()
 @commands.check(in_game_channel)
 @commands.is_owner()
+@commands.guild_only()
 async def fleave(ctx, member: discord.Member):
     global players
     if member.id in players:
@@ -259,7 +256,7 @@ async def fleave(ctx, member: discord.Member):
 @fleave.error
 async def fleave_error(ctx, error):
     if isinstance(error, commands.MissingRequiredArgument):
-        await ctx.send('Please include the member you wish to kick from the game.')
+        await ctx.send('{}fleave <Player>'.format(COMMAND_PREFIX))
     elif isinstance(error, commands.BadArgument):
         await ctx.send('I could not find that member.')
     else:
@@ -274,11 +271,6 @@ async def fleave_error(ctx, error):
 async def start(ctx):
     await ctx.send('Starting game...')
     await init_game(ctx)
-
-@start.error
-async def start_error(ctx, error):
-    await handle_errors(ctx, error)
-    
 
 @bot.command()
 @commands.check(is_not_running)
@@ -300,10 +292,6 @@ async def fstop(ctx): #Forces end_game()
     await end_game(ctx)
     await ctx.send('Force stopping game....')
 
-@fstop.error
-async def fstop_error(ctx, error):
-    await handle_errors(ctx, error)
-
 #--------- Skip ---------#
 @bot.command()
 @commands.check(is_running)
@@ -314,16 +302,13 @@ async def fskip(ctx):
     end_phase = True
     await ctx.send('Force skipped phase.')
 
-@fskip.error
-async def fskip_error(ctx, error):
-    await handle_errors(ctx, error)
-
 #--------- Challenge Phase --------#
 @bot.command()
 @commands.check(is_CP)
 @commands.check(is_player)
 @commands.check(is_running)
 @commands.check(in_game_channel)
+@commands.guild_only()
 async def challenge(ctx, member: discord.Member, challenge_type): #TODO Prevent you from challenging yourself
     global challenges
     if ctx.author.id not in challenges:
@@ -353,6 +338,7 @@ async def challenge_error(ctx, error):
 @commands.check(is_player)
 @commands.check(is_running)
 @commands.check(in_game_channel)
+@commands.guild_only()
 async def accept(ctx, member: discord.Member):
     global challenges
     if member.id in players:
@@ -385,6 +371,7 @@ async def accept_error(ctx, error):
 @commands.check(is_player)
 @commands.check(is_running)
 @commands.check(in_game_channel)
+@commands.guild_only()
 async def deny(ctx, member: discord.Member):
     global challenges
     if players[ctx.author.id]['gifts']['deny'] >= 1:
@@ -421,21 +408,18 @@ async def deny_error(ctx, error):
 @commands.check(is_player)
 @commands.check(is_running)
 @commands.check(in_game_channel)
+@commands.guild_only()
 async def nochallenge(ctx):
     challenges[ctx.author.id] = {'status':'Coward'}
     await ctx.send('**The {}** has chickened out.'.format(players[ctx.author.id]['mask']))
     update_info(challenges[ctx.author.id], author_id=ctx.author.id)
-
-@nochallenge.error
-async def nochallenge_error(ctx, error):
-    await handle_errors(ctx, error)
 
 #--------- Voting Phase ---------#
 @bot.command()
 @commands.check(is_VP)
 @commands.check(is_player)
 @commands.check(is_running)
-@commands.check(in_game_channel)
+@commands.dm_only()
 async def claim(ctx, gift):
     global players
     if players[ctx.player.id]['gifts']['unclaimed'] >= 1:
@@ -500,7 +484,7 @@ async def redeem_error(ctx, error):
 @commands.check(is_VP)
 @commands.check(is_player)
 @commands.check(is_running)
-@commands.check(in_game_channel)
+@commands.dm_only()
 async def vote(ctx, member: discord.Member):
     global players
     global votes
@@ -535,6 +519,7 @@ async def vote_error(ctx, error):
 @commands.check(is_player)
 @commands.check(is_running)
 @commands.check(in_game_channel)
+@commands.guild_only()
 async def switch(ctx, member: discord.Member):
     global players
     if players[ctx.author.id]['gifts']['plate switch'] >= 1:
@@ -689,7 +674,17 @@ async def end_game(ctx):
     players = OrderedDict()
     running = False
 
+@info.error
+@leave.error
+@start.error
+@fskip.error
+@fstop.error
+@nochallenge.error
 async def handle_errors(ctx, error):
+    if isinstance(error, commands.PrivateMessageOnly):
+        await ctx.send('Please only use this command in DMs.')
+    if isinstance(error, commands.NoPrivateMessage):
+        await ctx.send('Please use this command in the game channel.')
     if isinstance(error, NoGameChannel):
         await ctx.send('There is no designated game channel on this server, please use the {}setup command to designate one.'.format(COMMAND_PREFIX))
     if isinstance(error, NotGameChannel):
@@ -714,7 +709,5 @@ async def handle_errors(ctx, error):
         await ctx.send('It is not currently the Voting Phase.')
     if isinstance(error, NotDPError):
         await ctx.send('It is not currently the Dinner Phase.')
-    if isinstance(error, commands.PrivateMessageOnly):
-        await ctx.send('Please only use this command in DMs.')
 
 bot.run(BOT_KEY)
