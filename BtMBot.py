@@ -31,8 +31,6 @@ end_phase = False
 
 guild_settings = {} #guild id:{'channel':game channel, 'role': player role}
 
-MAX_PLAYERS = 15
-MIN_PLAYERS = 15
 ROLES = [
     {'name':'Poisoner', 'duel':7, 'dance':8},
     {'name':'Barbarian', 'duel':14, 'dance':1, 'intimidate':3},
@@ -51,8 +49,9 @@ ROLES = [
     {'name':'Thief', 'duel':4, 'dance':13}
     ]
 
-game_info =  discord.Embed(title='The game has not started yet.')
-player_status = discord.Embed(title='The game has not started yet.')
+game_info =  discord.Embed(title="You didn't see anything.")
+player_status = discord.Embed(title='Signups: 0/{}'.format(MIN_PLAYERS))
+player_status.add_field(name='Players', value='None', inline=False)
 
 ########## INIT ############
 @bot.event
@@ -195,9 +194,8 @@ async def info(ctx):
     await ctx.send(embed=game_info)
 
 @bot.command()
-@commands.check(is_running)
 @commands.guild_only()
-async def status(ctx):
+async def players(ctx):
     await ctx.send(embed=player_status)
 
 #--------- Join and Leave ---------#
@@ -209,6 +207,7 @@ async def status(ctx):
 @commands.guild_only()
 async def join(ctx, mask):
     global player_info
+    global player_status
     global masks
     await ctx.author.add_roles(guild_settings[ctx.guild.id]['role'])
     player_info[ctx.author.id] = { 
@@ -221,6 +220,11 @@ async def join(ctx, mask):
         'waiting': 1
         }
     masks[mask] = ctx.author
+    player_status.title = 'Signups: {}/{}'.format(len(player_info), MIN_PLAYERS)
+    if player_status.fields[0].value == 'None':
+        player_status.set_field_at(0, name=player_status.fields[0].name, value='**The {}**, {}#{}({})\n'.format(mask, ctx.author.name, ctx.author.discriminator, ctx.author.id), inline=False)
+    else:
+        player_status.set_field_at(0, name=player_status.fields[0].name, value=''.join([player_status.fields[0].value, '**The {}**, {}#{}({})\n'.format(mask, ctx.author.name, ctx.author.discriminator, ctx.author.id)]), inline=False)
     await ctx.send('{} has joined the game as **The {}**! {} more players needed.'.format(ctx.author.mention, mask, MAX_PLAYERS - len(player_info)))
 
 @join.error
@@ -237,10 +241,19 @@ async def join_error(ctx, error):
 async def leave(ctx):
     if running:
         await kill_player(ctx, ctx.author, 'committed suicide')
+        remove_wait(dead, ctx.author.id)
     else:
         await ctx.send('**The {}** has left the game. {} more players needed.'.format(player_info[ctx.author.id]['mask'], MIN_PLAYERS - len(player_info) + 1))
         await ctx.author.remove_roles(guild_settings[ctx.guild.id]['role'])
-        masks.pop(player_info.pop(ctx.author.id)['mask'])
+        mask = player_info.pop(ctx.author.id)['mask']
+        masks.pop(mask)
+        
+        status = player_status.fields[0].value.split('**The {}**, {}#{}({})\n'.format(mask, ctx.author.name, ctx.author.discriminator, ctx.author.id))
+        player_status.title = 'Signups: {}/{}'.format(len(player_info), MIN_PLAYERS)
+        if status[0] == '' and status[1] == '':
+            player_status.set_field_at(0, name=player_status.fields[0].name, value='None', inline=False)
+        else:
+            player_status.set_field_at(0, name=player_status.fields[0].name, value=''.join(status), inline=False)
 
 @bot.command()
 @commands.check(in_game_channel)
@@ -251,10 +264,19 @@ async def fleave(ctx, member: discord.Member):
     if member.id in player_info:
         if running:
             await kill_player(ctx, member, 'died of a heart attack')
+            remove_wait(dead, member.id)
         else:
             await ctx.send('**The {}** is dragged away by his parents because it is past his bed time. {} more players needed.'.format(player_info[member.id]['mask'], MIN_PLAYERS - len(player_info) + 1))
             await member.remove_roles(guild_settings[ctx.guild.id]['role'])
-            masks.pop(player_info.pop(member.id)['mask'])
+            mask = player_info.pop(ctx.author.id)['mask']
+            masks.pop(mask)
+        
+            status = player_status.fields[0].value.split('**The {}**, {}#{}({})\n'.format(mask, ctx.author.name, ctx.author.discriminator, ctx.author.id))
+            player_status.title = 'Signups: {}/{}'.format(len(player_info), MIN_PLAYERS)
+            if status[0] == '' and status[1] == '':
+                player_status.set_field_at(0, name=player_status.fields[0].name, value='None', inline=False)
+            else:
+                player_status.set_field_at(0, name=player_status.fields[0].name, value=''.join(status), inline=False)
 
 @fleave.error
 async def fleave_error(ctx, error):
@@ -577,7 +599,9 @@ async def game_loop(ctx): #TODO
     global state
     global phase_start
     global game_info
+    global player_status
     global end_phase
+    global waiting_id
     try:
         while running:
             state['round'] += 1
@@ -591,6 +615,11 @@ async def game_loop(ctx): #TODO
             game_info.add_field(name='Denied Challenges', value='None', inline=False)
             game_info.add_field(name='Cowards', value='None', inline=False)
             game_info.add_field(name='Waiting On', value=''.join(['The {}\n'.format(player_info[player]['mask']) for player in player_info]), inline=False)
+            waiting_id = 4
+
+            player_status.title = 'CP{}'.format(state['round'])
+            player_status.set_field_at(0, name='Alive Players', value=player_status.fields[0].value, inline=False)
+            player_status.add_field(name='Dead Players', value='None', inline=False)
 
             for player in player_info:
                 player_info[player]['waiting']  = 1
@@ -627,29 +656,23 @@ async def game_loop(ctx): #TODO
 
 def update_info(new_info, challenger_id = None, author_id=None):
     global game_info
-    global end_phase
     global player_info
     messages = []
     if state['phase'] == 'CP':
         if new_info['status'] == 'Pending':
-            print('Pend')
             field_id = 0
             if player_info[new_info['opponent']]['waiting'] == 0:
                 game_info.set_field_at(4, name=game_info.fields[4].name, value=''.join([game_info.fields[4].value, 'The {}\n'.format(player_info[new_info['opponent']]['mask'])]), inline=False)
             player_info[new_info['opponent']]['waiting'] += 1
             messages.append('The {} has challenged the {} to a {}\n'.format(player_info[challenger_id]['mask'], player_info[new_info['opponent']]['mask'], new_info['type']))
         elif new_info['status'] == 'Coward':
-            print('Cow')
             field_id = 3
             messages.append('The {}\n'.format(player_info[challenger_id]['mask']))
-        else:
-            print('A/D')    
+        else:  
             if new_info['status'] == 'Accepted':
-                print('acc')
                 field_id = 1
                 messages.append('The {} will {} with The {}\n'.format(player_info[challenger_id]['mask'], new_info['type'], player_info[new_info['opponent']]['mask']))
             elif new_info['status'] == 'Denied':
-                print('den')
                 field_id = 2
                 messages.append("The {} has denied The {}'s {}\n".format(player_info[challenger_id]['mask'], player_info[new_info['opponent']]['mask'], new_info['type']))
                 
@@ -664,17 +687,21 @@ def update_info(new_info, challenger_id = None, author_id=None):
             messages.insert(0, game_info.fields[field_id].value)
 
         player_info[author_id]['waiting'] -= 1
-        print(player_info[author_id]['waiting'])
-        if player_info[author_id]['waiting'] == 0:
-            waiting = game_info.fields[4].value.split('The {}\n'.format(player_info[author_id]['mask']))
-            print(waiting)
-            if waiting[0] == '' and waiting[1] == '':
-                game_info.set_field_at(4, name=game_info.fields[4].name, value='None', inline=False)
-                end_phase = True
-            else:
-                game_info.set_field_at(4, name=game_info.fields[4].name, value=''.join(waiting), inline=False)
+
+    if player_info[author_id]['waiting'] == 0:
+        remove_wait(player_info, author_id)
 
     game_info.set_field_at(field_id, name=game_info.fields[field_id].name, value=''.join(messages), inline=False)
+
+def remove_wait(info, target_id):
+    global end_phase
+    waiting = game_info.fields[waiting_id].value.split('The {}\n'.format(info[target_id]['mask']))
+    print(waiting)
+    if waiting[0] == '' and waiting[1] == '':
+        game_info.set_field_at(4, name=game_info.fields[waiting_id].name, value='None', inline=False)
+        end_phase = True
+    else:
+        game_info.set_field_at(4, name=game_info.fields[waiting_id].name, value=''.join(waiting), inline=False)
 
 async def convert_member(ctx, key): #TODO
     if key is str:
@@ -691,32 +718,52 @@ async def remove_role(ctx, member):
 
 async def kill_player(ctx, member, reason, reveal=True):
     global dead
-    try:
-        member = await commands.MemberConverter().convert(ctx, str(member))
-        await remove_role(ctx, member.id)
-        dead[member.id] = {'mask':player_info[member.id]['mask'], 'role':player_info[member.id]['role']['name'], 'death':reason, 'time':'{}{}'.format(state['phase'], state['round'])}
-        masks.pop(player_info.pop(member.id)['mask'])
-        if reveal:
-            await ctx.send('**The {}** {}. They were **The {}**! *{} players remain*.'.format(dead[member.id]['mask'], reason, dead[member.id]['role'], len(player_info)))
-        else:
-            await ctx.send('**The {}** {}. *{} players remain*.'.format(dead[member.id]['mask'], reason, len(player_info)))
-    except Exception as e:
-        print(e)
+    member = await commands.MemberConverter().convert(ctx, str(member))
+    await remove_role(ctx, member.id)
+    dead[member.id] = {'mask':player_info[member.id]['mask'], 'role':player_info[member.id]['role']['name'], 'death':reason, 'time':'{}{}'.format(state['phase'], state['round'])}
+    masks.pop(player_info.pop(member.id)['mask'])
+
+    status = player_status.fields[0].value.split('**The {}**, {}#{}({})\n'.format(dead[member.id]['mask'], member.name, member.discriminator, member.id))
+    player_status.title = '{}{}: {}/{}'.format(state['phase'], state['round'], len(player_info), MIN_PLAYERS)
+    if status[0] == '' and status[1] == '':
+        player_status.set_field_at(0, name=player_status.fields[0].name, value='None', inline=False)
+    else:    
+        player_status.set_field_at(0, name=player_status.fields[0].name, value=''.join(status), inline=False)
+
+    if player_status.fields[1].value == 'None':
+        pre_value = ''
+    else:
+        pre_value = player_status.fields[1].value
+
+    if reveal:
+        await ctx.send('**The {}** {}. They were **The {}**! *{} players remain*.'.format(dead[member.id]['mask'], reason, dead[member.id]['role'], len(player_info)))
+        post_value = '**The {}**, {}#{}({})\n - {} {}{} **The {}**\n'.format(dead[member.id]['mask'], member.name, member.discriminator, member.id, dead[member.id]['death'], state['phase'], state['round'], dead[member.id]['role'])
+    else:
+        await ctx.send('**The {}** {}. *{} players remain*.'.format(dead[member.id]['mask'], reason, len(player_info)))
+        post_value = '**The {}**, {}#{}({})\n - {} {}{}\n'.format(dead[member.id]['mask'], member.name, member.discriminator, member.id, dead[member.id]['reason'], state['phase'], state['round'])
+    
+    player_status.set_field_at(1, name=player_status.fields[1].name, value=''.join([pre_value, post_value]), inline=False)
 
 async def end_game(ctx):
     global running
     global player_info
+    global game_info
+    global player_status
     global masks
     await ctx.channel.set_permissions(ctx.guild.default_role, overwrite=None) #Resets channel permissions for @everyone
 
     for player in player_info:
         await remove_role(ctx, player)
     
+    game_info =  discord.Embed(title="You didn't see anything.")
+    player_status = discord.Embed(title='Signups: 0/{}'.format(MIN_PLAYERS))
+    player_status.add_field(name='Players', value='None', inline=False)
     player_info = OrderedDict()
     masks = {}
     running = False
 
 @info.error
+@players.error
 @leave.error
 @start.error
 @fskip.error
