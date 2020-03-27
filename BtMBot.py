@@ -26,7 +26,7 @@ dead = OrderedDict() #uid:[mask, role, death]
 
 state = {'phase':None, 'round':1}
 challenges = OrderedDict() #uid:[dance/duel, uid]
-votes = OrderedDict() #uid:[uids of voters]
+votes = {} #uid:[uids of voters]
 end_phase = False
 
 guild_settings = {} #guild id:{'channel':game channel, 'role': player role}
@@ -209,23 +209,26 @@ async def join(ctx, mask):
     global player_info
     global player_status
     global masks
-    await ctx.author.add_roles(guild_settings[ctx.guild.id]['role'])
-    player_info[ctx.author.id] = { 
-        'mask':mask, 
-        'role':{'name':'', 'duel':0, 'dance':0}, 
-        'gifts':{'unclaimed': 0, 'deny':1, 'encore':0, 'plate switch':1, 'guess':False, 'guess immunity':False, 'reserve':0, 'premium':False},
-        'votes':{'voted':False, 'votable':False}, 
-        'plate':{'poisoned':False},
-        'death':'',
-        'waiting': 1
-        }
-    masks[mask] = ctx.author
-    player_status.title = 'Signups: {}/{}'.format(len(player_info), MIN_PLAYERS)
-    if player_status.fields[0].value == 'None':
-        player_status.set_field_at(0, name=player_status.fields[0].name, value='**The {}**, {}#{}({})\n'.format(mask, ctx.author.name, ctx.author.discriminator, ctx.author.id), inline=False)
+    if mask not in masks:
+        await ctx.author.add_roles(guild_settings[ctx.guild.id]['role'])
+        player_info[ctx.author.id] = { 
+            'mask':mask, 
+            'role':{'name':'', 'duel':0, 'dance':0}, 
+            'gifts':{'unclaimed': 0, 'deny':1, 'encore':0, 'plate switch':1, 'guess':False, 'guess immunity':False, 'reserve':0, 'premium':False},
+            'votes':{'voted':False, 'votable':False}, 
+            'plate':{'poisoned':False},
+            'death':'',
+            'waiting': 1
+            }
+        masks[mask] = ctx.author
+        player_status.title = 'Signups: {}/{}'.format(len(player_info), MIN_PLAYERS)
+        if player_status.fields[0].value == 'None':
+            player_status.set_field_at(0, name=player_status.fields[0].name, value='**The {}**, {}#{}({})\n'.format(mask, ctx.author.name, ctx.author.discriminator, ctx.author.id), inline=False)
+        else:
+            player_status.set_field_at(0, name=player_status.fields[0].name, value=''.join([player_status.fields[0].value, '**The {}**, {}#{}({})\n'.format(mask, ctx.author.name, ctx.author.discriminator, ctx.author.id)]), inline=False)
+        await ctx.send('{} has joined the game as **The {}**! {} more players needed.'.format(ctx.author.mention, mask, MAX_PLAYERS - len(player_info)))
     else:
-        player_status.set_field_at(0, name=player_status.fields[0].name, value=''.join([player_status.fields[0].value, '**The {}**, {}#{}({})\n'.format(mask, ctx.author.name, ctx.author.discriminator, ctx.author.id)]), inline=False)
-    await ctx.send('{} has joined the game as **The {}**! {} more players needed.'.format(ctx.author.mention, mask, MAX_PLAYERS - len(player_info)))
+        ctx.send('You cannot have the same mask as another player.')
 
 @join.error
 async def join_error(ctx, error):
@@ -259,8 +262,9 @@ async def leave(ctx):
 @commands.check(in_game_channel)
 @commands.is_owner()
 @commands.guild_only()
-async def fleave(ctx, member: discord.Member):
+async def fleave(ctx, member):
     global player_info
+    member = await convert_member(ctx, member)
     if member.id in player_info:
         if running:
             await kill_player(ctx, member, 'died of a heart attack')
@@ -334,8 +338,9 @@ async def fskip(ctx):
 @commands.check(is_running)
 @commands.check(in_game_channel)
 @commands.guild_only()
-async def challenge(ctx, member: discord.Member, challenge_type): #TODO Prevent you from challenging yourself
+async def challenge(ctx, member, challenge_type): #TODO Prevent you from challenging yourself
     global challenges
+    member = await convert_member(ctx, member)
     if ctx.author.id not in challenges:
         if member.id in player_info:
             if member.id != ctx.author.id:
@@ -367,8 +372,9 @@ async def challenge_error(ctx, error):
 @commands.check(is_running)
 @commands.check(in_game_channel)
 @commands.guild_only()
-async def accept(ctx, member: discord.Member):
+async def accept(ctx, member):
     global challenges
+    member = await convert_member(ctx, member)
     if member.id in player_info:
         if member.id in challenges:
             if challenges[member.id]['opponent'] == ctx.author.id:
@@ -400,8 +406,9 @@ async def accept_error(ctx, error):
 @commands.check(is_running)
 @commands.check(in_game_channel)
 @commands.guild_only()
-async def deny(ctx, member: discord.Member):
+async def deny(ctx, member):
     global challenges
+    member = await convert_member(ctx, member)
     if player_info[ctx.author.id]['gifts']['deny'] >= 1:
         if member.id in player_info:
             if member.id in challenges:
@@ -513,9 +520,10 @@ async def redeem_error(ctx, error):
 @commands.check(is_player)
 @commands.check(is_running)
 @commands.dm_only()
-async def vote(ctx, member: discord.Member):
+async def vote(ctx, member):
     global player_info
     global votes
+    member = await convert_member(ctx, member)
     if not player_info[ctx.author.id]['votes']['voted']:
         if member.id in player_info:
             if player_info[member.id]['votes']['votable']:
@@ -548,8 +556,9 @@ async def vote_error(ctx, error):
 @commands.check(is_running)
 @commands.check(in_game_channel)
 @commands.guild_only()
-async def switch(ctx, member: discord.Member):
+async def switch(ctx, member):
     global player_info
+    member = await convert_member(ctx, member)
     if player_info[ctx.author.id]['gifts']['plate switch'] >= 1:
         if member.id in player_info:
             player_info[ctx.author.id]['gifts']['plate switch'] -= 1
@@ -575,9 +584,11 @@ async def init_game(ctx):
     global running
     global state
     global player_info
+    global game_timer
     global end_phase
     end_phase = False
     running = True #Game is running
+    game_timer = datetime.datetime.now()
     state['round'] = 0
 
     await ctx.channel.set_permissions(ctx.guild.default_role, send_messages=False) #Prevents non-players from posting in the channel
@@ -592,12 +603,15 @@ async def init_game(ctx):
         await player.send('You are **The {}**!'.format(player_info[player.id]['role']['name']))
         i += 1
 
+    player_status.set_field_at(0, name='Alive Players', value=player_status.fields[0].value, inline=False)
+    player_status.add_field(name='Dead Players', value='None', inline=False)
+
     bot.loop.create_task(game_loop(ctx))
 
 async def game_loop(ctx): #TODO
     global challenges
+    global votes
     global state
-    global phase_start
     global game_info
     global player_status
     global end_phase
@@ -605,8 +619,8 @@ async def game_loop(ctx): #TODO
     try:
         while running:
             state['round'] += 1
+            #Challenge Phase
             challenges = OrderedDict()
-            phase_start = datetime.datetime.now()
             end_phase = False
 
             game_info = discord.Embed(title='CP{}'.format(state['round']))
@@ -618,22 +632,17 @@ async def game_loop(ctx): #TODO
             waiting_id = 4
 
             player_status.title = 'CP{}'.format(state['round'])
-            player_status.set_field_at(0, name='Alive Players', value=player_status.fields[0].value, inline=False)
-            player_status.add_field(name='Dead Players', value='None', inline=False)
 
             for player in player_info:
                 player_info[player]['waiting']  = 1
 
-            await ctx.send('It is now CP{}. You may make challenges with /challenge and accept them with /accept and /deny'.format(state['round']))
+            await ctx.send('It is now CP{}. You may make challenges with {prefix}challenge and accept them with {prefix}accept and {prefix}deny. You may also choose to not challenge with {prefix}nochallenge.'.format(state['round'], prefix=COMMAND_PREFIX))
             state['phase'] = 'CP'
 
-            while datetime.datetime.now() < phase_start + timedelta(seconds=CP_TIMEOUT):
-                if not running:
-                    raise GameEnded
-                if end_phase:
-                    break
-                game_info.title = 'CP{} | Time Remaining: {}'.format(state['round'], str(phase_start + timedelta(seconds = CP_TIMEOUT) - datetime.datetime.now()))
-                await asyncio.sleep(0.1)
+            phase_duration = await phase_loop(datetime.datetime.now())
+            await game_info(ctx)
+
+            game_info = discord.Embed(title='{}{} Results | Phase Duration:{}'.format(state['phase'], state['round'], phase_duration))
 
             for item in challenges:
                 if challenges[item]['status'] != 'Coward':
@@ -650,9 +659,37 @@ async def game_loop(ctx): #TODO
                             player_info[item]['votes']['votable'] = True
                         player_info[item]['gifts']['unclaimed'] += 1
                         player_info[challenges[item]['opponent']]['gifts']['unclaimed'] +=1
-                        await ctx.send('**The {}** won the {} with the {}.'.format(winner, challenges[item]['type'], loser))    
+                        await ctx.send('**The {}** won the {} with the {}.'.format(winner, challenges[item]['type'], loser))
+
+            #Voting Phase
+            votes = {}
+            end_phase = False
+
+            game_info = discord.Embed(title='VP{}'.format(state['round']))
+            game_info.add_field(name='Waiting On', value=''.join(['The {}\n'.format(player_info[player]['mask']) for player in player_info]), inline=False)
+            waiting_id = 0
+
+            player_status.title = 'VP{}'.format(state['round'])
+
+            for player in player_info:
+                player_info[player]['waiting']  = 1
+
+            await ctx.send('It is now VP{}. You may {prefix}vote on players that lost challenges in the previous round. You may also claim gifts by dming the bot with {prefix}claim.'.format(state['round'], prefix=COMMAND_PREFIX))
+            state['phase'] = 'VP'
+
     except GameEnded:
         await ctx.send('Game was forced to stop.')
+
+async def phase_loop(phase_timer):
+    while datetime.datetime.now() < phase_timer + timedelta(seconds=CP_TIMEOUT):
+        if not running:
+            raise GameEnded
+        if end_phase:
+            break
+        game_info.title = '{}{} | Time Remaining: {}'.format(state['phase'], state['round'], str(phase_timer + timedelta(seconds = CP_TIMEOUT) - datetime.datetime.now()))
+        game_info.description = 'Total Time Elapsed: {}'.format(datetime.datetime.now() - game_timer)
+        await asyncio.sleep(0.1)
+    return datetime.datetime.now() - phase_timer
 
 def update_info(new_info, challenger_id = None, author_id=None):
     global game_info
@@ -704,9 +741,8 @@ def remove_wait(info, target_id):
         game_info.set_field_at(4, name=game_info.fields[waiting_id].name, value=''.join(waiting), inline=False)
 
 async def convert_member(ctx, key): #TODO
-    if key is str:
-        if key in masks:
-            return masks[key]
+    if key in masks:
+        return masks[key]
     return await commands.MemberConverter().convert(ctx, str(key))
 
 async def remove_role(ctx, member):
