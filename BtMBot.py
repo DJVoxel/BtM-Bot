@@ -214,7 +214,7 @@ async def join(ctx, mask):
         player_info[ctx.author.id] = { 
             'mask':mask, 
             'role':{'name':'', 'duel':0, 'dance':0}, 
-            'gifts':{'unclaimed': 0, 'deny':1, 'encore':0, 'plate switch':1, 'guess':False, 'guess immunity':False, 'reserve':0, 'premium':False},
+            'gifts':{'unclaimed': 1, 'deny':1, 'encore':0, 'plate switch':1, 'guess':False, 'guess immunity':False, 'reserve':0, 'premium food':False},
             'votes':{'voted':False, 'votable':False}, 
             'plate':{'poisoned':False},
             'death':'',
@@ -338,16 +338,16 @@ async def fskip(ctx):
 @commands.check(is_running)
 @commands.check(in_game_channel)
 @commands.guild_only()
-async def challenge(ctx, member, challenge_type): #TODO Prevent you from challenging yourself
+async def challenge(ctx, member, challenge_type):
     global challenges
     member = await convert_member(ctx, member)
     if ctx.author.id not in challenges:
         if member.id in player_info:
             if member.id != ctx.author.id:
                 if challenge_type.lower() == 'dance' or challenge_type.lower() == 'duel':
-                    challenges[ctx.author.id] = {'type':challenge_type.lower(), 'opponent':member.id, 'status':'Pending'}
+                    challenges[ctx.author.id] = {'type':challenge_type.lower(), 'target':member.id, 'status':'Pending'}
                     await ctx.send('**The {}** has challenged **The {}** to a **{}**!'.format(player_info[ctx.author.id]['mask'], player_info[member.id]['mask'], challenge_type.lower()))
-                    update_info(challenges[ctx.author.id], challenger_id=ctx.author.id, author_id=ctx.author.id)
+                    update_info(challenges[ctx.author.id], author_id=ctx.author.id, target_id=member.id)
                 else:
                     await ctx.send('"{}" is not a valid challenge type.'.format(challenge_type))
             else:
@@ -377,11 +377,11 @@ async def accept(ctx, member):
     member = await convert_member(ctx, member)
     if member.id in player_info:
         if member.id in challenges:
-            if challenges[member.id]['opponent'] == ctx.author.id:
+            if challenges[member.id]['target'] == ctx.author.id:
                 if challenges[member.id]['status'] == 'Pending':
                     challenges[member.id]['status'] = 'Accepted'
                     await ctx.send("**The {}** has accepted **The {}'s** {}!".format(player_info[ctx.author.id]['mask'], player_info[member.id]['mask'], challenges[member.id]['type']))
-                    update_info(challenges[member.id], challenger_id=member.id, author_id=ctx.author.id)
+                    update_info(challenges[member.id], target_id=member.id, author_id=ctx.author.id)
                 else:
                     await ctx.send('You have already accepted or denied this challenge.')
             else:
@@ -412,12 +412,12 @@ async def deny(ctx, member):
     if player_info[ctx.author.id]['gifts']['deny'] >= 1:
         if member.id in player_info:
             if member.id in challenges:
-                if challenges[member.id]['opponent'] == ctx.author.id:
+                if challenges[member.id]['target'] == ctx.author.id:
                     if challenges[member.id]['status'] == 'Pending':
                         player_info[ctx.author.id]['gifts']['deny'] -= 1
                         challenges[member.id]['status'] = 'Denied'
                         await ctx.send("**The {}** has denied **The {}'s** {}!".format(player_info[ctx.author.id]['mask'], player_info[member.id]['mask'], challenges[member.id]['type']))
-                        update_info(challenges[member.id], challenger_id=member.id, author_id=ctx.author.id)
+                        update_info(challenges[member.id], target_id=member.id, author_id=ctx.author.id)
                     else:
                         await ctx.send('You have already accepted or denied this challenge.')
                 else:
@@ -447,7 +447,7 @@ async def deny_error(ctx, error):
 async def nochallenge(ctx):
     challenges[ctx.author.id] = {'status':'Coward'}
     await ctx.send('**The {}** has chickened out.'.format(player_info[ctx.author.id]['mask']))
-    update_info(challenges[ctx.author.id], challenger_id=ctx.author.id, author_id=ctx.author.id)
+    update_info(challenges[ctx.author.id], author_id=ctx.author.id)
 
 #--------- Voting Phase ---------#
 @bot.command()
@@ -457,12 +457,12 @@ async def nochallenge(ctx):
 @commands.dm_only()
 async def claim(ctx, gift):
     global player_info
-    if player_info[ctx.player.id]['gifts']['unclaimed'] >= 1:
+    if player_info[ctx.author.id]['gifts']['unclaimed'] >= 1:
         if gift.lower() == 'deny' or gift.lower() == 'encore' or gift.lower() == 'plate switch' or gift.lower() == 'reserve':
             player_info[ctx.author.id]['gifts']['unclaimed'] -= 1
             player_info[ctx.author.id]['gifts'][gift.lower()] += 1
             await ctx.send('You have claimed a {}.'.format(gift.lower()))
-        elif gift.lower() == 'guess' or gift.lower() == 'guess immunity' or gift.lower() == 'premium':
+        elif gift.lower() == 'guess' or gift.lower() == 'guess immunity' or gift.lower() == 'premium food':
             if not player_info[ctx.author.id]['gifts'][gift.lower()]:
                 player_info[ctx.author.id]['gifts']['unclaimed'] -= 1
                 player_info[ctx.author.id]['gifts'][gift.lower()] = True
@@ -471,6 +471,12 @@ async def claim(ctx, gift):
                 await ctx.send('You have already claimed that gift this round.')
         else:
             await ctx.send('That gift does not exist.')
+        
+        if player_info[ctx.author.id]['gifts']['unclaimed'] == 0:
+            player_info[ctx.author.id]['waiting'] -= 1
+        
+        if player_info[ctx.author.id]['waiting'] == 0:
+            remove_wait(player_info, ctx.author.id)
     else:
         await ctx.send('You have already claimed your maximum number of gifts this round.')
 
@@ -486,15 +492,15 @@ async def claim_error(ctx, error):
 @bot.command()
 @commands.check(is_VP)
 @commands.check(is_player)
-@commands.dm_only()
+@commands.guild_only()
 async def redeem(ctx, gift):
     global player_info
-    if player_info[ctx.player.id]['gifts']['reserve'] >= 1:
+    if player_info[ctx.author.id]['gifts']['reserve'] >= 1:
         if gift.lower() == 'deny' or gift.lower() == 'encore' or gift.lower() == 'plate switch':
             player_info[ctx.author.id]['gifts']['reserve'] -= 1
             player_info[ctx.author.id]['gifts'][gift.lower()] += 1
             await ctx.send('You have redeemed a {}.'.format(gift.lower()))
-        elif gift.lower() == 'guess' or gift.lower() == 'guess immunity' or gift.lower() == 'premium':
+        elif gift.lower() == 'guess' or gift.lower() == 'guess immunity' or gift.lower() == 'premium food':
             if not player_info[ctx.author.id]['gifts'][gift.lower()]:
                 player_info[ctx.author.id]['gifts']['reserve'] -= 1
                 player_info[ctx.author.id]['gifts'][gift.lower()] = True
@@ -519,20 +525,20 @@ async def redeem_error(ctx, error):
 @commands.check(is_VP)
 @commands.check(is_player)
 @commands.check(is_running)
-@commands.dm_only()
-async def vote(ctx, member):
+@commands.guild_only()
+async def vote(ctx, member): #TODO Allow players to change their votes.
     global player_info
     global votes
     member = await convert_member(ctx, member)
-    if not player_info[ctx.author.id]['votes']['voted']:
+    if player_info[ctx.author.id]:
         if member.id in player_info:
             if player_info[member.id]['votes']['votable']:
-                if member.id in votes:
-                    votes[member.id].append(ctx.author.id)
+                if ctx.author.id in votes:
+                    update_info(author_id=ctx.author.id, target_id=member.id, previous_target=votes[ctx.author.id])
                 else:
-                    votes[member.id] = [ctx.author.id]
-                player_info[ctx.author.id]['votes']['voted'] = True
-                await ctx.send('**The {}** has voted for **The {}**, bringing their vote count to **{}**!'.format(player_info[ctx.author.id]['mask'], player_info[member.id]['mask'], len(votes[member.id])))
+                    update_info(author_id=ctx.author.id, target_id=member.id)
+                votes[ctx.author.id] = member.id
+                await ctx.send('**The {}** has voted for **The {}**!'.format(player_info[ctx.author.id]['mask'], player_info[member.id]['mask']))
             else:
                 await ctx.send('You cannot vote for that player as they did not lose a challenge this round.')
         else:
@@ -634,35 +640,47 @@ async def game_loop(ctx): #TODO
             player_status.title = 'CP{}'.format(state['round'])
 
             for player in player_info:
-                player_info[player]['waiting']  = 1
+                player_info[player]['waiting'] = 1
 
             await ctx.send('It is now CP{}. You may make challenges with {prefix}challenge and accept them with {prefix}accept and {prefix}deny. You may also choose to not challenge with {prefix}nochallenge.'.format(state['round'], prefix=COMMAND_PREFIX))
             state['phase'] = 'CP'
 
-            phase_duration = await phase_loop(datetime.datetime.now())
-            await game_info(ctx)
+            phase_duration = await phase_loop(datetime.datetime.now(), CP_TIMEOUT)
+            await info(ctx)
 
-            game_info = discord.Embed(title='{}{} Results | Phase Duration:{}'.format(state['phase'], state['round'], phase_duration))
+            game_info = discord.Embed(title='{}{} Results | Phase Duration:{}'.format(state['phase'], state['round'], phase_duration), description='')
+            game_info.add_field(name='Claimable Gifts:', value='None', inline=False)
+            game_info.add_field(name='Votable Players:', value='None', inline=False)
 
             for item in challenges:
-                if challenges[item]['status'] != 'Coward':
-                    if challenges[item]['status'] == 'Denied':
-                        await ctx.send("**The {}**'s {} with **The {}** was denied.".format(player_info[item]['mask'], challenges[item]['type'], player_info[challenges[item]['opponent']]['mask']))
+                if challenges[item]['status'] != 'Coward' and challenges[item]['status'] != 'Denied':
+                    if player_info[item]['role'][challenges[item]['type']] > player_info[challenges[item]['target']]['role'][challenges[item]['type']]:
+                        winner = item
+                        loser = challenges[item]['target']
                     else:
-                        if player_info[item]['role'][challenges[item]['type']] > player_info[challenges[item]['opponent']]['role'][challenges[item]['type']]:
-                            winner = player_info[item]['mask']
-                            loser = player_info[challenges[item]['opponent']]['mask']
-                            player_info[challenges[item]['opponent']]['votes']['votable'] = True
-                        else:
-                            loser = player_info[item]['mask']
-                            winner = player_info[challenges[item]['opponent']]['mask']
-                            player_info[item]['votes']['votable'] = True
-                        player_info[item]['gifts']['unclaimed'] += 1
-                        player_info[challenges[item]['opponent']]['gifts']['unclaimed'] +=1
-                        await ctx.send('**The {}** won the {} with the {}.'.format(winner, challenges[item]['type'], loser))
+                        loser = item
+                        winner = challenges[item]['target']
+                    player_info[winner]['gifts']['unclaimed'] += 1
+                    player_info[loser]['gifts']['unclaimed'] +=1
+                    game_info.description = ''.join([game_info.description, '**The {}** won the {} with the {}.\n'.format(player_info[winner]['mask'], challenges[item]['type'], player_info[loser]['mask'])])
+                    #TODO if state['round'] != 1:
+                    player_info[loser]['votes']['votable'] = True
+                    if game_info.fields[1].value == 'None':
+                        game_info.set_field_at(1, name=game_info.fields[1].name, value='**The {}**\n'.format(player_info[loser]['mask']), inline=False)
+                    else:
+                        game_info.set_field_at(1, name=game_info.fields[1].name, value=''.join([game_info.fields[1].value, '**The {}**\n'.format(player_info[loser]['mask'])]), inline=False)
+            
+            for player in player_info:
+                if game_info.fields[0].value == 'None':
+                    game_info.set_field_at(0, name=game_info.fields[0].name, value='**The {}** - {}\n'.format(player_info[player]['mask'], player_info[player]['gifts']['unclaimed']), inline=False)
+                else:
+                    game_info.set_field_at(0, name=game_info.fields[0].name, value=''.join([game_info.fields[0].value, '**The {}** - {}\n'.format(player_info[player]['mask'], player_info[player]['gifts']['unclaimed'])]), inline=False)
+
+            await info(ctx)
 
             #Voting Phase
             votes = {}
+            vote_results = {}
             end_phase = False
 
             game_info = discord.Embed(title='VP{}'.format(state['round']))
@@ -672,48 +690,74 @@ async def game_loop(ctx): #TODO
             player_status.title = 'VP{}'.format(state['round'])
 
             for player in player_info:
-                player_info[player]['waiting']  = 1
+                if player_info[player]['votes']['votable']:
+                    game_info.add_field(name='**The {}** - 0'.format(player_info[player]['mask']), value='None')
+                    vote_results[player] = []
+
+            for player in player_info:
+                player_info[player]['waiting'] = 0
+                if len(game_info.fields) >=2:
+                    player_info[player]['waiting'] += 1
+                if player_info[player]['gifts']['unclaimed'] != 0:
+                    player_info[player]['waiting'] += 1
 
             await ctx.send('It is now VP{}. You may {prefix}vote on players that lost challenges in the previous round. You may also claim gifts by dming the bot with {prefix}claim.'.format(state['round'], prefix=COMMAND_PREFIX))
             state['phase'] = 'VP'
 
+            phase_duration = await phase_loop(datetime.datetime.now(), VP_TIMEOUT)
+            await info(ctx)
+
+            game_info = discord.Embed(title='{}{} Results | Phase Duration:{}'.format(state['phase'], state['round'], phase_duration))
+
+            for vote in votes:
+                vote_results[votes[vote]].append(vote)
+            
+            target = None
+            for result in vote_results:
+                if target is None:
+                    target = result
+                elif len(vote_results[result]) > len(vote_results[target]):
+                    target = result
+
+            await kill_player(ctx, target, 'was executed', reveal=False)
+
     except GameEnded:
         await ctx.send('Game was forced to stop.')
 
-async def phase_loop(phase_timer):
-    while datetime.datetime.now() < phase_timer + timedelta(seconds=CP_TIMEOUT):
+async def phase_loop(phase_timer, timeout):
+    while datetime.datetime.now() < phase_timer + timedelta(seconds=timeout):
         if not running:
             raise GameEnded
         if end_phase:
             break
-        game_info.title = '{}{} | Time Remaining: {}'.format(state['phase'], state['round'], str(phase_timer + timedelta(seconds = CP_TIMEOUT) - datetime.datetime.now()))
+        game_info.title = '{}{} | Time Remaining: {}'.format(state['phase'], state['round'], str(phase_timer + timedelta(seconds = timeout) - datetime.datetime.now()))
         game_info.description = 'Total Time Elapsed: {}'.format(datetime.datetime.now() - game_timer)
         await asyncio.sleep(0.1)
     return datetime.datetime.now() - phase_timer
 
-def update_info(new_info, challenger_id = None, author_id=None):
+def update_info(challenge_info=None, target_id=None, author_id=None, previous_target= None):
     global game_info
     global player_info
     messages = []
     if state['phase'] == 'CP':
-        if new_info['status'] == 'Pending':
+        if challenge_info['status'] == 'Pending':
             field_id = 0
-            if player_info[new_info['opponent']]['waiting'] == 0:
-                game_info.set_field_at(4, name=game_info.fields[4].name, value=''.join([game_info.fields[4].value, 'The {}\n'.format(player_info[new_info['opponent']]['mask'])]), inline=False)
-            player_info[new_info['opponent']]['waiting'] += 1
-            messages.append('The {} has challenged the {} to a {}\n'.format(player_info[challenger_id]['mask'], player_info[new_info['opponent']]['mask'], new_info['type']))
-        elif new_info['status'] == 'Coward':
+            if player_info[target_id]['waiting'] == 0:
+                game_info.set_field_at(4, name=game_info.fields[4].name, value=''.join([game_info.fields[4].value, 'The {}\n'.format(player_info[target_id]['mask'])]), inline=False)
+            player_info[target_id]['waiting'] += 1
+            messages.append('The {} has challenged the {} to a {}\n'.format(player_info[author_id]['mask'], player_info[target_id]['mask'], challenge_info['type']))
+        elif challenge_info['status'] == 'Coward':
             field_id = 3
-            messages.append('The {}\n'.format(player_info[challenger_id]['mask']))
+            messages.append('The {}\n'.format(player_info[author_id]['mask']))
         else:  
-            if new_info['status'] == 'Accepted':
+            if challenge_info['status'] == 'Accepted':
                 field_id = 1
-                messages.append('The {} will {} with The {}\n'.format(player_info[challenger_id]['mask'], new_info['type'], player_info[new_info['opponent']]['mask']))
-            elif new_info['status'] == 'Denied':
+                messages.append('The {} will {} with The {}\n'.format(player_info[author_id]['mask'], challenge_info['type'], player_info[target_id]['mask']))
+            elif challenge_info['status'] == 'Denied':
                 field_id = 2
-                messages.append("The {} has denied The {}'s {}\n".format(player_info[challenger_id]['mask'], player_info[new_info['opponent']]['mask'], new_info['type']))
+                messages.append("The {} has denied The {}'s {}\n".format(player_info[author_id]['mask'], player_info[target_id]['mask'], challenge_info['type']))
                 
-            pending = game_info.fields[0].value.split('The {} has challenged the {} to a {}\n'.format(player_info[challenger_id]['mask'], player_info[new_info['opponent']]['mask'], new_info['type']))
+            pending = game_info.fields[0].value.split('The {} has challenged the {} to a {}\n'.format(player_info[author_id]['mask'], player_info[target_id]['mask'], challenge_info['type']))
 
             if pending[0] == '' and pending[1] == '':
                 game_info.set_field_at(0, name=game_info.fields[0].name, value='None', inline=False)
@@ -725,22 +769,40 @@ def update_info(new_info, challenger_id = None, author_id=None):
 
         player_info[author_id]['waiting'] -= 1
 
+        game_info.set_field_at(field_id, name=game_info.fields[field_id].name, value=''.join(messages), inline=False)
+    
+    try:
+        if state['phase'] == 'VP':
+            for index, field in enumerate(game_info.fields):
+                if previous_target is not None:
+                    if field.name == '**The {}** - {}'.format(player_info[previous_target]['mask'], len(field.value.split('\n')) - 1):
+                        if field.value.split('The {}\n'.format(player_info[author_id]['mask'])) == ['', '']:
+                            game_info.set_field_at(index, name='**The {}** - {}'.format(player_info[previous_target]['mask'], len(field.value.split('\n')) - 1), value='None')
+                        else:
+                            game_info.set_field_at(index, name='**The {}** - {}'.format(player_info[previous_target]['mask'], len(field.value.split('\n')) - 2), value=''.join(field.value.split('The {}\n'.format(player_info[author_id]['mask']))))
+                else:
+                    player_info[author_id]['waiting'] -= 1
+                if field.name == '**The {}** - {}'.format(player_info[target_id]['mask'], len(field.value.split('\n')) - 1):
+                    if field.value == 'None':
+                        game_info.set_field_at(index, name='**The {}** - {}'.format(player_info[target_id]['mask'], len(field.value.split('\n'))), value='The {}\n'.format(player_info[author_id]['mask']))
+                    else:
+                        game_info.set_field_at(index, name='**The {}** - {}'.format(player_info[target_id]['mask'], len(field.value.split('\n'))), value=''.join([field.value, 'The {}\n'.format(player_info[author_id]['mask'])]))
+    except Exception:
+        traceback.print_exc()
+
     if player_info[author_id]['waiting'] == 0:
         remove_wait(player_info, author_id)
-
-    game_info.set_field_at(field_id, name=game_info.fields[field_id].name, value=''.join(messages), inline=False)
 
 def remove_wait(info, target_id):
     global end_phase
     waiting = game_info.fields[waiting_id].value.split('The {}\n'.format(info[target_id]['mask']))
-    print(waiting)
     if waiting[0] == '' and waiting[1] == '':
-        game_info.set_field_at(4, name=game_info.fields[waiting_id].name, value='None', inline=False)
+        game_info.set_field_at(waiting_id, name=game_info.fields[waiting_id].name, value='None', inline=False)
         end_phase = True
     else:
-        game_info.set_field_at(4, name=game_info.fields[waiting_id].name, value=''.join(waiting), inline=False)
+        game_info.set_field_at(waiting_id, name=game_info.fields[waiting_id].name, value=''.join(waiting), inline=False)
 
-async def convert_member(ctx, key): #TODO
+async def convert_member(ctx, key):
     if key in masks:
         return masks[key]
     return await commands.MemberConverter().convert(ctx, str(key))
@@ -776,7 +838,7 @@ async def kill_player(ctx, member, reason, reveal=True):
         post_value = '**The {}**, {}#{}({})\n - {} {}{} **The {}**\n'.format(dead[member.id]['mask'], member.name, member.discriminator, member.id, dead[member.id]['death'], state['phase'], state['round'], dead[member.id]['role'])
     else:
         await ctx.send('**The {}** {}. *{} players remain*.'.format(dead[member.id]['mask'], reason, len(player_info)))
-        post_value = '**The {}**, {}#{}({})\n - {} {}{}\n'.format(dead[member.id]['mask'], member.name, member.discriminator, member.id, dead[member.id]['reason'], state['phase'], state['round'])
+        post_value = '**The {}**, {}#{}({})\n - {} {}{}\n'.format(dead[member.id]['mask'], member.name, member.discriminator, member.id, dead[member.id]['death'], state['phase'], state['round'])
     
     player_status.set_field_at(1, name=player_status.fields[1].name, value=''.join([pre_value, post_value]), inline=False)
 
