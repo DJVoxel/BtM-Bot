@@ -51,7 +51,6 @@ ROLES = [
 
 game_info =  discord.Embed(title="You didn't see anything.")
 player_status = discord.Embed(title='Signups: 0/{}'.format(MIN_PLAYERS))
-player_status.add_field(name='Players', value='None', inline=False)
 
 ########## INIT ############
 @bot.event
@@ -214,18 +213,17 @@ async def join(ctx, mask):
         player_info[ctx.author.id] = { 
             'mask':mask, 
             'role':{'name':'', 'duel':0, 'dance':0}, 
-            'gifts':{'unclaimed': 1, 'deny':1, 'encore':0, 'plate switch':1, 'guess':False, 'guess immunity':False, 'reserve':0, 'premium food':False},
+            'gifts':{'unclaimed': 0, 'deny':1, 'encore':0, 'plate switch':1, 'guess':False, 'guess immunity':False, 'reserve':0, 'premium food':False},
             'votes':{'voted':False, 'votable':False}, 
             'plate':{'poisoned':False},
             'death':'',
             'waiting': 1
             }
         masks[mask] = ctx.author
+
         player_status.title = 'Signups: {}/{}'.format(len(player_info), MIN_PLAYERS)
-        if player_status.fields[0].value == 'None':
-            player_status.set_field_at(0, name=player_status.fields[0].name, value='**The {}**, {}#{}({})\n'.format(mask, ctx.author.name, ctx.author.discriminator, ctx.author.id), inline=False)
-        else:
-            player_status.set_field_at(0, name=player_status.fields[0].name, value=''.join([player_status.fields[0].value, '**The {}**, {}#{}({})\n'.format(mask, ctx.author.name, ctx.author.discriminator, ctx.author.id)]), inline=False)
+        player_status.add_field(name='**The {}**, {}#{}({})'.format(mask, ctx.author.name, ctx.author.discriminator, ctx.author.id), value='1 deny\n1 plate switch')
+
         await ctx.send('{} has joined the game as **The {}**! {} more players needed.'.format(ctx.author.mention, mask, MAX_PLAYERS - len(player_info)))
     else:
         ctx.send('You cannot have the same mask as another player.')
@@ -251,12 +249,11 @@ async def leave(ctx):
         mask = player_info.pop(ctx.author.id)['mask']
         masks.pop(mask)
         
-        status = player_status.fields[0].value.split('**The {}**, {}#{}({})\n'.format(mask, ctx.author.name, ctx.author.discriminator, ctx.author.id))
         player_status.title = 'Signups: {}/{}'.format(len(player_info), MIN_PLAYERS)
-        if status[0] == '' and status[1] == '':
-            player_status.set_field_at(0, name=player_status.fields[0].name, value='None', inline=False)
-        else:
-            player_status.set_field_at(0, name=player_status.fields[0].name, value=''.join(status), inline=False)
+        for index, field in enumerate(player_status.fields):
+            if field.name == '**The {}**, {}#{}({})'.format(mask, ctx.author.name, ctx.author.discriminator, ctx.author.id):
+                player_status.remove_field(index)
+                break
 
 @bot.command()
 @commands.check(in_game_channel)
@@ -272,15 +269,14 @@ async def fleave(ctx, member):
         else:
             await ctx.send('**The {}** is dragged away by his parents because it is past his bed time. {} more players needed.'.format(player_info[member.id]['mask'], MIN_PLAYERS - len(player_info) + 1))
             await member.remove_roles(guild_settings[ctx.guild.id]['role'])
-            mask = player_info.pop(ctx.author.id)['mask']
+            mask = player_info.pop(member.id)['mask']
             masks.pop(mask)
         
-            status = player_status.fields[0].value.split('**The {}**, {}#{}({})\n'.format(mask, ctx.author.name, ctx.author.discriminator, ctx.author.id))
             player_status.title = 'Signups: {}/{}'.format(len(player_info), MIN_PLAYERS)
-            if status[0] == '' and status[1] == '':
-                player_status.set_field_at(0, name=player_status.fields[0].name, value='None', inline=False)
-            else:
-                player_status.set_field_at(0, name=player_status.fields[0].name, value=''.join(status), inline=False)
+            for index, field in enumerate(player_status.fields):
+                if field.name == '**The {}**, {}#{}({})'.format(mask, member.name, member.discriminator, member.id):
+                    player_status.remove_field(index)
+                    break
 
 @fleave.error
 async def fleave_error(ctx, error):
@@ -609,9 +605,6 @@ async def init_game(ctx):
         await player.send('You are **The {}**!'.format(player_info[player.id]['role']['name']))
         i += 1
 
-    player_status.set_field_at(0, name='Alive Players', value=player_status.fields[0].value, inline=False)
-    player_status.add_field(name='Dead Players', value='None', inline=False)
-
     bot.loop.create_task(game_loop(ctx))
 
 async def game_loop(ctx): #TODO
@@ -637,7 +630,7 @@ async def game_loop(ctx): #TODO
             game_info.add_field(name='Waiting On', value=''.join(['The {}\n'.format(player_info[player]['mask']) for player in player_info]), inline=False)
             waiting_id = 4
 
-            player_status.title = 'CP{}'.format(state['round'])
+            player_status.title = 'CP{} | {}/{}'.format(state['round'], len(player_info), len(player_info) + len(dead))
 
             for player in player_info:
                 player_info[player]['waiting'] = 1
@@ -645,6 +638,7 @@ async def game_loop(ctx): #TODO
             await ctx.send('It is now CP{}. You may make challenges with {prefix}challenge and accept them with {prefix}accept and {prefix}deny. You may also choose to not challenge with {prefix}nochallenge.'.format(state['round'], prefix=COMMAND_PREFIX))
             state['phase'] = 'CP'
 
+            # - Challenge Loop
             phase_duration = await phase_loop(datetime.datetime.now(), CP_TIMEOUT)
             await info(ctx)
 
@@ -687,7 +681,7 @@ async def game_loop(ctx): #TODO
             game_info.add_field(name='Waiting On', value=''.join(['The {}\n'.format(player_info[player]['mask']) for player in player_info]), inline=False)
             waiting_id = 0
 
-            player_status.title = 'VP{}'.format(state['round'])
+            player_status.title = 'VP{} | {}/{}'.format(state['round'], len(player_info), len(player_info) + len(dead))
 
             for player in player_info:
                 if player_info[player]['votes']['votable']:
@@ -704,6 +698,7 @@ async def game_loop(ctx): #TODO
             await ctx.send('It is now VP{}. You may {prefix}vote on players that lost challenges in the previous round. You may also claim gifts by dming the bot with {prefix}claim.'.format(state['round'], prefix=COMMAND_PREFIX))
             state['phase'] = 'VP'
 
+            # - Vote Loop
             phase_duration = await phase_loop(datetime.datetime.now(), VP_TIMEOUT)
             await info(ctx)
 
@@ -720,6 +715,34 @@ async def game_loop(ctx): #TODO
                     target = result
 
             await kill_player(ctx, target, 'was executed', reveal=False)
+
+            for player in player_info:
+                player = await commands.MemberConverter().convert(ctx, str(player))
+                for index, field in player_status.fields:
+                    if field.name == '**The {}**, {}#{}({})'.format(player_info[player.id]['mask'], player.name, player.discriminator, player.id):
+                        gift_info = []
+                        if player_info[player.id]['gifts']['deny'] >= 1:
+                            gift_info.append('{} deny\n'.format(player_info[player.id]['gifts']['deny']))
+                        if player_info[player.id]['gifts']['encore'] >= 1:
+                            gift_info.append('{} encore\n'.format(player_info[player.id]['gifts']['encore']))
+                        if player_info[player.id]['gifts']['plate switch'] >= 1:
+                            gift_info.append('{} plate switch\n'.format(player_info[player.id]['gifts']['plate switch']))
+                        if player_info[player.id]['gifts']['guess immunity']:
+                            gift_info.append('guess immmunity\n')
+                        if player_info[player.id]['gifts']['guess']:
+                            gift_info.append('free guess\n')
+                        if player_info[player.id]['gifts']['premium food']:
+                            gift_info.append('premium food\n')
+                        if player_info[player.id]['gifts']['reserve'] >= 1:
+                            gift_info.append('{} reserve\n'.format(player_info[player.id]['gifts']['reserve']))
+                        
+                        if gift_info == []:
+                            gift_info.append('Empty')
+
+                        player_status.set_field_at(index, name=field.name, value=''.join(gift_info))
+                        break
+
+            players(ctx)
 
     except GameEnded:
         await ctx.send('Game was forced to stop.')
@@ -821,26 +844,18 @@ async def kill_player(ctx, member, reason, reveal=True):
     dead[member.id] = {'mask':player_info[member.id]['mask'], 'role':player_info[member.id]['role']['name'], 'death':reason, 'time':'{}{}'.format(state['phase'], state['round'])}
     masks.pop(player_info.pop(member.id)['mask'])
 
-    status = player_status.fields[0].value.split('**The {}**, {}#{}({})\n'.format(dead[member.id]['mask'], member.name, member.discriminator, member.id))
-    player_status.title = '{}{}: {}/{}'.format(state['phase'], state['round'], len(player_info), MIN_PLAYERS)
-    if status[0] == '' and status[1] == '':
-        player_status.set_field_at(0, name=player_status.fields[0].name, value='None', inline=False)
-    else:    
-        player_status.set_field_at(0, name=player_status.fields[0].name, value=''.join(status), inline=False)
-
-    if player_status.fields[1].value == 'None':
-        pre_value = ''
-    else:
-        pre_value = player_status.fields[1].value
-
     if reveal:
         await ctx.send('**The {}** {}. They were **The {}**! *{} players remain*.'.format(dead[member.id]['mask'], reason, dead[member.id]['role'], len(player_info)))
-        post_value = '**The {}**, {}#{}({})\n - {} {}{} **The {}**\n'.format(dead[member.id]['mask'], member.name, member.discriminator, member.id, dead[member.id]['death'], state['phase'], state['round'], dead[member.id]['role'])
+        death_value = '**The {}**, {}#{}({})\n - {} {}{} **The {}**\n'.format(dead[member.id]['mask'], member.name, member.discriminator, member.id, dead[member.id]['death'], state['phase'], state['round'], dead[member.id]['role'])
     else:
         await ctx.send('**The {}** {}. *{} players remain*.'.format(dead[member.id]['mask'], reason, len(player_info)))
-        post_value = '**The {}**, {}#{}({})\n - {} {}{}\n'.format(dead[member.id]['mask'], member.name, member.discriminator, member.id, dead[member.id]['death'], state['phase'], state['round'])
+        death_value = '{} {}{}'.format(dead[member.id]['death'], state['phase'], state['round'])
     
-    player_status.set_field_at(1, name=player_status.fields[1].name, value=''.join([pre_value, post_value]), inline=False)
+    player_status.title = '{}{} | {}/{}'.format(state['phase'], state['round'], len(player_info), MIN_PLAYERS)
+    for index, field in enumerate(player_status.fields):
+        if field.name == '**The {}**, {}#{}({})'.format(player_info[ctx.author.id]['mask'], ctx.author.name, ctx.author.discriminator, ctx.author.id):
+            player_status.set_field_at(index, name=player_status.fields[index].name, value=death_value)
+            break
 
 async def end_game(ctx):
     global running
@@ -855,7 +870,6 @@ async def end_game(ctx):
     
     game_info =  discord.Embed(title="You didn't see anything.")
     player_status = discord.Embed(title='Signups: 0/{}'.format(MIN_PLAYERS))
-    player_status.add_field(name='Players', value='None', inline=False)
     player_info = OrderedDict()
     masks = {}
     running = False
