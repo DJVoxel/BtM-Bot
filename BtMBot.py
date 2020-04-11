@@ -27,12 +27,14 @@ dead = OrderedDict() #uid:[mask, role, death]
 state = {'phase':None, 'round':1}
 challenges = OrderedDict() #uid:[dance/duel, uid]
 votes = {} #uid:[uids of voters]
+guesses = {} #uid:[role, uid]
+role_complete = 0
 end_phase = False
 
 guild_settings = {} #guild id:{'channel':game channel, 'role': player role}
 
 ROLES = [
-    {'name':'Poisoner', 'duel':7, 'dance':8},
+    {'name':'Poisoner', 'duel':7, 'dance':8, 'poison':True},
     {'name':'Barbarian', 'duel':14, 'dance':1, 'intimidate':3},
     {'name':'Blackmailer', 'duel':8, 'dance':11},
     {'name':'Blacksmith', 'duel':11, 'dance':2},
@@ -324,7 +326,9 @@ async def fstop(ctx): #Forces end_game()
 @commands.is_owner()
 async def fskip(ctx):
     global end_phase
+    global role_complete
     end_phase = True
+    role_complete = 0
     await ctx.send('Force skipped phase.')
 
 #--------- Challenge Phase --------#
@@ -458,11 +462,21 @@ async def claim(ctx, gift):
             player_info[ctx.author.id]['gifts']['unclaimed'] -= 1
             player_info[ctx.author.id]['gifts'][gift.lower()] += 1
             await ctx.send('You have claimed a {}.'.format(gift.lower()))
+
+            player_info[ctx.author.id]['waiting'] -= 1
+
+            if player_info[ctx.author.id]['waiting'] == 0:
+                remove_wait(player_info, ctx.author.id)
         elif gift.lower() == 'guess' or gift.lower() == 'guess immunity' or gift.lower() == 'premium food':
             if not player_info[ctx.author.id]['gifts'][gift.lower()]:
                 player_info[ctx.author.id]['gifts']['unclaimed'] -= 1
                 player_info[ctx.author.id]['gifts'][gift.lower()] = True
                 await ctx.send('You have claimed a {}.'.format(gift.lower()))
+
+                player_info[ctx.author.id]['waiting'] -= 1
+
+                if player_info[ctx.author.id]['waiting'] == 0:
+                    remove_wait(player_info, ctx.author.id)
             else:
                 await ctx.send('You have already claimed that gift this round.')
         else:
@@ -522,11 +536,10 @@ async def redeem_error(ctx, error):
 @commands.check(is_player)
 @commands.check(is_running)
 @commands.guild_only()
-async def vote(ctx, member): #TODO Allow players to change their votes.
-    global player_info
+async def vote(ctx, member):
     global votes
     member = await convert_member(ctx, member)
-    if player_info[ctx.author.id]:
+    if player_info[ctx.author.id]['gifts']['unclaimed'] == 0 and player_info[ctx.author.id]['waiting'] == 1 or player_info[ctx.author.id]['gifts']['unclaimed'] > 0 and player_info[ctx.author.id]['waiting'] == 2:
         if member.id in player_info:
             if player_info[member.id]['votes']['votable']:
                 if ctx.author.id in votes:
@@ -565,8 +578,10 @@ async def switch(ctx, member):
         if member.id in player_info:
             player_info[ctx.author.id]['gifts']['plate switch'] -= 1
             player_info[ctx.author.id]['plate'], player_info[member.id]['plate'] = player_info[member.id]['plate'], player_info[ctx.author.id]['plate']
-            player_info[ctx.author.id]['gifts']['premium'], player_info[member.id]['gifts']['premium'] = player_info[member.id]['gifts']['premium'], player_info[ctx.author.id]['gifts']['premium']
+            player_info[ctx.author.id]['gifts']['premium food'], player_info[member.id]['gifts']['premium food'] = player_info[member.id]['gifts']['premium food'], player_info[ctx.author.id]['gifts']['premium food']
             await ctx.send('**The {}** has switched plates with **The {}**!'.format(player_info[ctx.author.id]['mask'], player_info[member.id]['mask']))
+
+            update_info(target_id=member.id, author_id=ctx.author.id)
         else:
             await ctx.send('Please select a user that is playing in the current game.')
     else:
@@ -581,6 +596,94 @@ async def switch_error(ctx, error):
     else:
         await handle_errors(ctx, error)
 
+@bot.command()
+@commands.check(is_DP)
+@commands.check(is_player)
+@commands.check(is_running)
+@commands.check(in_game_channel)
+@commands.guild_only()
+async def noswitch(ctx):
+    global player_info
+    await ctx.send('The {} has decided not to switch plates with anyone.'.format(player_info[ctx.author.id]['mask']))
+    if player_info[ctx.author.id]['gifts']['guess']:
+        player_info[ctx.author.id]['waiting'] = 1
+    else:
+        player_info[ctx.author.id]['waiting'] = 0
+        remove_wait(player_info, ctx.author.id)
+
+@bot.command()
+@commands.check(is_DP)
+@commands.check(is_player)
+@commands.check(is_running)
+@commands.dm_only()
+async def guess(ctx, member, role):
+    global player_info
+    member = await convert_member(ctx, member)
+    if player_info[ctx.author.id]['gifts']['guess']:  
+        if member.id in player_info:
+            if role.lower().capitalize() in [ROLES[i]['name'] for i in ROLES]:
+                guesses[ctx.author.id]['target'] == member.id
+                guesses[ctx.author.id]['role'] = role.lower().capitalize()
+                player_info[ctx.author.id]['gifts']['guess'] = False
+                player_info[ctx.author.id]['waiting'] -= 1
+
+                if player_info[ctx.author.id] == 0:
+                    remove_wait(player_info, ctx.author.id)
+            else:
+                ctx.send('I could not find that role.')
+        else:
+            ctx.send('Please select a user that is playing in the current game.')
+    else:
+        ctx.send('You do not have a guess available.')
+
+@guess.error
+async def guess_error(ctx, error):
+    if isinstance(error, commands.BadArgument):
+        await ctx.send('I could not find that member.')
+    elif isinstance(error, commands.MissingRequiredArgument):
+        await ctx.send('{}guess <player> <role>'.format(COMMAND_PREFIX))
+    else:
+        await handle_errors(ctx, error)
+
+########## ROLE ABILITIES ##########
+
+#--------- CP Roles ---------#
+
+#--------- VP Roles ---------#
+@bot.command()
+@commands.check(is_VP)
+@commands.check(is_player)
+@commands.check(is_running)
+@commands.dm_only()
+async def poison(ctx, member):
+    global role_complete
+    global player_info
+    member = await convert_member(ctx, member)
+    if player_info[ctx.author.id]['role']['name'] == 'Poisoner':
+        if player_info[ctx.author.id]['role']['poison']:
+            if member.id in player_info:
+                player_info[member.id]['plate']['poisoned'] = True
+                player_info[ctx.author.id]['role']['poison'] = False
+                role_complete -= 1
+                await ctx.send("You have poisoned The {}'s plate".format(player_info[member.id]['mask']))
+            else:
+                await ctx.send('Please select a user that is playing the current game.')
+        else:
+            await ctx.send('You have already poisoned someone this round.')
+    else:
+        await ctx.send('You are not the Poisoner')
+
+@poison.error
+async def poison_error(ctx, error):
+    if isinstance(error, commands.BadArgument):
+        await ctx.send('I could not find that member.')
+    elif isinstance(error, commands.MissingRequiredArgument):
+        await ctx.send('{}poison <player>'.format(COMMAND_PREFIX))
+    else:
+        await handle_errors(ctx, error)
+
+#--------- DP Roles ---------#
+
 ########## FUNCTIONS ##########
 async def init_game(ctx):
     global running
@@ -588,10 +691,12 @@ async def init_game(ctx):
     global player_info
     global game_timer
     global end_phase
+    global role_complete
     end_phase = False
     running = True #Game is running
     game_timer = datetime.datetime.now()
     state['round'] = 0
+    role_complete = 0
 
     await ctx.channel.set_permissions(ctx.guild.default_role, send_messages=False) #Prevents non-players from posting in the channel
     player_keys = list(player_info)
@@ -610,17 +715,20 @@ async def init_game(ctx):
 async def game_loop(ctx): #TODO
     global challenges
     global votes
+    global guesses
     global state
     global game_info
     global player_status
     global end_phase
     global waiting_id
+    global role_complete
     try:
         while running:
             state['round'] += 1
             #Challenge Phase
             challenges = OrderedDict()
             end_phase = False
+            role_complete = 0
 
             game_info = discord.Embed(title='CP{}'.format(state['round']))
             game_info.add_field(name='Pending Challenges', value='None', inline=False)
@@ -643,6 +751,8 @@ async def game_loop(ctx): #TODO
             await info(ctx)
 
             game_info = discord.Embed(title='{}{} Results | Phase Duration:{}'.format(state['phase'], state['round'], phase_duration), description='')
+            
+            # - Challenge Results
             game_info.add_field(name='Claimable Gifts:', value='None', inline=False)
             game_info.add_field(name='Votable Players:', value='None', inline=False)
 
@@ -676,6 +786,7 @@ async def game_loop(ctx): #TODO
             votes = {}
             vote_results = {}
             end_phase = False
+            role_complete = 0
 
             game_info = discord.Embed(title='VP{}'.format(state['round']))
             game_info.add_field(name='Waiting On', value=''.join(['The {}\n'.format(player_info[player]['mask']) for player in player_info]), inline=False)
@@ -694,18 +805,26 @@ async def game_loop(ctx): #TODO
                     player_info[player]['waiting'] += 1
                 if player_info[player]['gifts']['unclaimed'] != 0:
                     player_info[player]['waiting'] += 1
+                if player_info[player]['role']['name'] == 'Poisoner':
+                    player_info[player]['role']['poison'] = True
+                    target = await commands.MemberConverter().convert(ctx, str(player))
+                    await target.dm_channel.send('It is now the Voting Phase. Please select a player you wish to poison during the Dinner Phase with /poison <player>.')
+                    role_complete += 1
+                if player_info[player]['waiting'] == 0:
+                    remove_wait(player_info, player)
 
             await ctx.send('It is now VP{}. You may {prefix}vote on players that lost challenges in the previous round. You may also claim gifts by dming the bot with {prefix}claim.'.format(state['round'], prefix=COMMAND_PREFIX))
             state['phase'] = 'VP'
 
             # - Vote Loop
             phase_duration = await phase_loop(datetime.datetime.now(), VP_TIMEOUT)
+
+            game_info.title='{}{} Results | Phase Duration:{}'.format(state['phase'], state['round'], phase_duration)
             await info(ctx)
 
-            game_info = discord.Embed(title='{}{} Results | Phase Duration:{}'.format(state['phase'], state['round'], phase_duration))
-
-            for vote in votes:
-                vote_results[votes[vote]].append(vote)
+            # - Vote Results
+            for item in votes:
+                vote_results[votes[item]].append(item)
             
             target = None
             for result in vote_results:
@@ -713,12 +832,12 @@ async def game_loop(ctx): #TODO
                     target = result
                 elif len(vote_results[result]) > len(vote_results[target]):
                     target = result
-
-            await kill_player(ctx, target, 'was executed', reveal=False)
+            if target is not None:
+                await kill_player(ctx, target, 'was executed', reveal=False)
 
             for player in player_info:
                 player = await commands.MemberConverter().convert(ctx, str(player))
-                for index, field in player_status.fields:
+                for index, field in enumerate(player_status.fields):
                     if field.name == '**The {}**, {}#{}({})'.format(player_info[player.id]['mask'], player.name, player.discriminator, player.id):
                         gift_info = []
                         if player_info[player.id]['gifts']['deny'] >= 1:
@@ -742,7 +861,47 @@ async def game_loop(ctx): #TODO
                         player_status.set_field_at(index, name=field.name, value=''.join(gift_info))
                         break
 
-            players(ctx)
+            #Dinner Phase
+            guesses = {}
+            end_phase = False
+            role_complete = 0
+
+            game_info = discord.Embed(title='DP{}'.format(state['round']))
+            game_info.add_field(name='Waiting On', value=''.join(['The {}\n'.format(player_info[player]['mask']) for player in player_info]), inline=False)
+            for player in player_info:
+                game_info.add_field(name='**The {}**'.format(player_info[player]['mask']), value="The {}'s plate".format(player_info[player]['mask']))
+            waiting_id = 0
+
+            player_status.title = 'DP{} | {}/{}'.format(state['round'], len(player_info), len(player_info) + len(dead))
+            for player in player_info:
+                player_info[player]['waiting'] = 0
+                if player_info[player]['gifts']['plate switch'] >= 1:
+                    player_info[player]['waiting'] += 1
+                if player_info[player]['gifts']['guess']:
+                    player_info[player]['waiting'] +=1
+                if player_info[player]['waiting'] == 0:
+                    remove_wait(player_info, player)
+            
+            await ctx.send("It is now DP{}. You may {prefix}switch your plate with another player to avoid the Poisoner's poison. You may also {prefix}guess another player's role in the bot's DMs if you claimed a Free Guess last round.".format(state['round'], prefix=COMMAND_PREFIX))
+            state['phase'] = 'DP'
+
+            # - Dinner Loop
+            phase_duration = await phase_loop(datetime.datetime.now(), DP_TIMEOUT)
+            
+            game_info.title='{}{} Results | Phase Duration:{}'.format(state['phase'], state['round'], phase_duration)
+            await info(ctx)
+
+            # - Dinner Results
+            for item in guesses:
+                ctx.send('**The {}** guesses that **The {}** is the **{}**!'.format(player_info[item]['mask'], player_info[item['target']]['mask'], item['role']))
+                if item['role'] == player_info[item['target']]['role']['name']:
+                    await kill_player(ctx, item['target'], 'was guessed as **The {}**'.format(item['role']))
+                else:
+                    ctx.send('**The {}** is not the **{}**!'.format(player_info[item['target']]['mask'], item['role']))
+
+            for player in player_info:
+                if player_info[player]['plate']['poisoned']:
+                    kill_player(ctx, player, 'was poisoned', reveal=False)
 
     except GameEnded:
         await ctx.send('Game was forced to stop.')
@@ -751,7 +910,7 @@ async def phase_loop(phase_timer, timeout):
     while datetime.datetime.now() < phase_timer + timedelta(seconds=timeout):
         if not running:
             raise GameEnded
-        if end_phase:
+        if end_phase and role_complete == 0:
             break
         game_info.title = '{}{} | Time Remaining: {}'.format(state['phase'], state['round'], str(phase_timer + timedelta(seconds = timeout) - datetime.datetime.now()))
         game_info.description = 'Total Time Elapsed: {}'.format(datetime.datetime.now() - game_timer)
@@ -780,7 +939,7 @@ def update_info(challenge_info=None, target_id=None, author_id=None, previous_ta
                 field_id = 2
                 messages.append("The {} has denied The {}'s {}\n".format(player_info[author_id]['mask'], player_info[target_id]['mask'], challenge_info['type']))
                 
-            pending = game_info.fields[0].value.split('The {} has challenged the {} to a {}\n'.format(player_info[author_id]['mask'], player_info[target_id]['mask'], challenge_info['type']))
+            pending = game_info.fields[0].value.split('The {} has challenged the {} to a {}\n'.format(player_info[target_id]['mask'], player_info[author_id]['mask'], challenge_info['type']))
 
             if pending[0] == '' and pending[1] == '':
                 game_info.set_field_at(0, name=game_info.fields[0].name, value='None', inline=False)
@@ -793,6 +952,9 @@ def update_info(challenge_info=None, target_id=None, author_id=None, previous_ta
         player_info[author_id]['waiting'] -= 1
 
         game_info.set_field_at(field_id, name=game_info.fields[field_id].name, value=''.join(messages), inline=False)
+
+        if player_info[author_id]['waiting'] == 0:
+            remove_wait(player_info, author_id)
     
     try:
         if state['phase'] == 'VP':
@@ -810,11 +972,34 @@ def update_info(challenge_info=None, target_id=None, author_id=None, previous_ta
                         game_info.set_field_at(index, name='**The {}** - {}'.format(player_info[target_id]['mask'], len(field.value.split('\n'))), value='The {}\n'.format(player_info[author_id]['mask']))
                     else:
                         game_info.set_field_at(index, name='**The {}** - {}'.format(player_info[target_id]['mask'], len(field.value.split('\n'))), value=''.join([field.value, 'The {}\n'.format(player_info[author_id]['mask'])]))
+            if player_info[author_id]['waiting'] == 0:
+                remove_wait(player_info, author_id)
     except Exception:
         traceback.print_exc()
-
-    if player_info[author_id]['waiting'] == 0:
-        remove_wait(player_info, author_id)
+    try:
+        if state['phase'] == 'DP': #TODO fields, name=player, desc=plate
+            target = 'whoops'
+            author = 'derp'
+            for index, field in enumerate(game_info.fields):
+                if field.name == '**The {}**'.format(player_info[target_id]['mask']):
+                    target = index
+                if field.name == '**The {}**'.format(player_info[author_id]['mask']):
+                    author = index
+            temp_value = game_info.fields[author].value
+            game_info.set_field_at(author, name=game_info.fields[author].name, value=game_info.fields[target].value)
+            game_info.set_field_at(target, name=game_info.fields[target].name, value=temp_value)
+        
+            if player_info[author_id]['gifts']['guess'] and player_info[author_id]['waiting'] > 1 or not player_info[author_id]['gifts']['guess'] and player_info[author_id]['waiting'] > 0:
+                player_info[author_id]['waiting'] -= 1
+                if player_info[author_id]['waiting'] == 0:
+                    remove_wait(player_info, author_id)
+        
+            if player_info[target_id]['gifts']['plate switch'] > 0:
+                if player_info[target_id]['waiting'] == 0:
+                    game_info.set_field_at(0, name=game_info.fields[0].name, value=''.join([game_info.fields[0].value, 'The {}\n'.format(player_info[target_id]['mask'])]))        
+                player_info[target_id]['waiting'] += 1
+    except Exception:
+        traceback.print_exc()
 
 def remove_wait(info, target_id):
     global end_phase
@@ -881,6 +1066,7 @@ async def end_game(ctx):
 @fskip.error
 @fstop.error
 @nochallenge.error
+@noswitch.error
 async def handle_errors(ctx, error):
     if isinstance(error, commands.PrivateMessageOnly):
         await ctx.send('Please only use this command in DMs.')
